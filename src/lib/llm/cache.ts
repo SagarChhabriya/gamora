@@ -38,3 +38,33 @@ export async function writeCache(key: string, value: GenerateResponse, ttlSecond
     // Cache failures never block a learner turn.
   }
 }
+
+export async function kvGet<T>(key: string): Promise<T | null> {
+  const client = getRedis();
+  if (!client) return null;
+  try {
+    return (await client.get<T>(`gamora:${key}`)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function kvSet(key: string, value: unknown, ttlSeconds: number) {
+  const client = getRedis();
+  if (!client) return;
+  try {
+    await client.set(`gamora:${key}`, value, { ex: ttlSeconds });
+  } catch {
+    // Prefetch is an optimisation only.
+  }
+}
+
+export async function kvDel(key: string) {
+  const client = getRedis();
+  if (!client) return;
+  try {
+    await client.del(`gamora:${key}`);
+  } catch {
+    // Ignore.
+  }
+}

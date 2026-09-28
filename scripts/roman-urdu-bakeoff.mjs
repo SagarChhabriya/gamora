@@ -11,7 +11,7 @@ try {
 }
 
 const prompts = JSON.parse(readFileSync("tests/eval/roman-urdu/prompts.json", "utf8"));
-const styleGuide = readFileSync("src/lib/llm/prompts/roman-urdu.txt", "utf8");
+const styleGuide = readFileSync("src/lib/llm/prompts/roman-urdu.ts", "utf8").match(/`([^`]+)`/)[1];
 
 const candidates = [
   { provider: "groq", model: process.env.LLM_GROQ_FAST_MODEL ?? "openai/gpt-oss-20b" },
