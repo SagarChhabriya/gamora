@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 
 import { AppShell } from "@/components/app-shell";
 import { Alert, Button, Eyebrow, Meter } from "@/components/ui";
-import { authFetch, signOut } from "@/lib/auth/client";
+import { authFetch } from "@/lib/auth/client";
 import type { SessionPayload } from "@/lib/auth/supabase-auth";
 
 type Journey = { id: string; title: string | null; story_theme: string; language: string; missions_total: number; missions_done: number; created_at: string };
@@ -132,23 +132,6 @@ function Home({ session }: { session: SessionPayload }) {
           </ul>
         </section>
       )}
-      <footer className="border-t border-ink/15 pt-6 text-sm text-ink/60">
-        <p>We keep only what is needed to adapt your learning: your answers, progress estimates and settings. Audio is never stored.</p>
-        <button
-          type="button"
-          className="mt-2 font-semibold text-danger underline underline-offset-4"
-          onClick={async () => {
-            if (!window.confirm("Delete your account, journeys and progress permanently? This cannot be undone.")) return;
-            const response = await authFetch("/api/profile", { method: "DELETE" });
-            if (response.ok) {
-              signOut();
-              router.replace("/login");
-            } else setError("Could not delete your data. Please try again.");
-          }}
-        >
-          Delete my data
-        </button>
-      </footer>
     </div>
   );
 }

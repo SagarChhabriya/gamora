@@ -4,7 +4,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 
-import { signOut, useSession } from "@/lib/auth/client";
+import { AccountMenu } from "@/components/account-menu";
+import { useSession } from "@/lib/auth/client";
 import type { SessionPayload } from "@/lib/auth/supabase-auth";
 import { cx } from "@/components/ui";
 
@@ -63,16 +64,7 @@ export function AppShell({ children, requireRole, wide }: Props) {
                 </Link>
               );
             })}
-            <button
-              type="button"
-              onClick={() => {
-                signOut();
-                router.replace("/login");
-              }}
-              className="px-3 py-2 text-ink/60 hover:text-accent"
-            >
-              Sign out
-            </button>
+            <AccountMenu session={session} />
           </nav>
         </div>
       </header>
