@@ -2,58 +2,69 @@
 
 Gamora is a source-grounded, adaptive learning experience engine. It turns trusted material into conversational missions and evidence-based progress.
 
+### Requirements
+
+- Node.js 22
+- pnpm 10
+- Supabase project
+- Groq and Gemini API keys
+- Upstash Redis credentials
+
 ### Local setup
 
-Requirements: Node.js 22 and pnpm 10.
-
-```bash
+```powershell
 pnpm install
+Copy-Item .env.example .env.local
 pnpm dev
 ```
 
-Validation commands:
+Open http://localhost:3000. Fill `.env.local` with the service values before using API routes. Never commit `.env.local`, provider keys, or service-role keys.
 
-```bash
+### Validation
+
+```powershell
 pnpm lint
 pnpm typecheck
 pnpm test
+pnpm build
+```
+
+For the browser smoke test:
+
+```powershell
+pnpm exec playwright install chromium
 pnpm test:e2e
 ```
 
-Copy `.env.example` to `.env.local` when adding service credentials. Never commit `.env.local` or provider keys.
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+### Ingestion API
 
-## Getting Started
+`POST /api/ingest` requires a Supabase access token:
 
-First, run the development server:
-
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```http
+Authorization: Bearer <access-token>
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Text request:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```json
+{
+  "title": "Source title",
+  "text": "Trusted source material"
+}
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The route also accepts `multipart/form-data` with `title` and `file`, or JSON with `title` and a safe HTTP(S) `url`. It stores chunks, concepts, and concept-edge links in Supabase.
 
-## Learn More
+Use `GET /api/ingest/<content_id>` with the same token to inspect stored chunks and concepts.
 
-To learn more about Next.js, take a look at the following resources:
+### Deployment
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The current deployment uses the authenticated Vercel CLI:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```powershell
+vercel --prod
+```
 
-## Deploy on Vercel
+Production alias: https://gamora-web.vercel.app
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+GitHub is optional for direct deployment. Connecting Git in Vercel enables automatic deployments from pushes.
