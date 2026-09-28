@@ -35,6 +35,16 @@ ${language === "roman_ur" ? `\nLANGUAGE\n${romanUrduStyleGuide}\n${codeSwitch[co
 Return only JSON matching the schema provided.`;
 }
 
+/**
+ * Closing line for every learner-facing prompt. The source chunks are usually English and sit right
+ * above this line, which pulls the model back to English unless the rule is repeated last.
+ */
+export function languageRule(language: Language) {
+  return language === "roman_ur"
+    ? "LANGUAGE: Write every learner-facing text field in Roman Urdu (Urdu in Latin script), keeping technical terms in English. The source is English, but do not answer in English. Do not use Urdu script."
+    : "LANGUAGE: Write every learner-facing text field in English.";
+}
+
 export function learnerText(text: string) {
   // Learner input is untrusted. Delimit it and strip anything that could close the tag.
   return `<learner_reply>${text.replace(/<\/?learner_reply>/gi, "").slice(0, 2_000)}</learner_reply>`;

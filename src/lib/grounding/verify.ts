@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { AppConfig, Persona } from "@/lib/config/schema";
 import { repairJson } from "@/lib/llm/json";
 import { generateWithFallback } from "@/lib/llm/router";
-import { learnerText, tutorSystemPrompt } from "@/lib/tutor/prompts";
+import { languageRule, learnerText, tutorSystemPrompt } from "@/lib/tutor/prompts";
 import { refsToIds, sourceBlock } from "@/lib/tutor/retrieval";
 import { fallbackActivity, generateActivity } from "@/lib/tutor/activity";
 import type { Activity, Language, Pace, SourceChunk } from "@/lib/tutor/types";
@@ -125,7 +125,8 @@ Return {"covered":boolean,"answer":string,"source_refs":["S1"]}
 ${learnerText(input.question)}
 <source>
 ${sourceBlock(input.chunks)}
-</source>`,
+</source>
+${languageRule(input.language)}`,
         },
       ],
     });
