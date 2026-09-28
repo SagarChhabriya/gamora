@@ -5,6 +5,7 @@ import { repairJson } from "@/lib/llm/json";
 import { generateWithFallback } from "@/lib/llm/router";
 import { learnerText, tutorSystemPrompt } from "@/lib/tutor/prompts";
 import { refsToIds, sourceBlock } from "@/lib/tutor/retrieval";
+import { fallbackActivity, generateActivity } from "@/lib/tutor/activity";
 import type { Activity, Language, Pace, SourceChunk } from "@/lib/tutor/types";
 
 const verdictItem = z.object({
@@ -42,16 +43,18 @@ export async function verifyClaims(input: {
   strictness: AppConfig["grounding"]["verifier"];
   requestId?: string;
   userHash?: string;
+  /** "reasoning" gives an independent, larger judge for evals. */
+  task?: "fast" | "reasoning";
 }): Promise<VerifyResult> {
   if (input.strictness === "off" || !input.claims.length) return { ok: true, unsupported: [], checked: 0 };
   try {
     const response = await generateWithFallback({
-      task: "fast",
+      task: input.task ?? "fast",
       model: process.env.LLM_FAST_MODEL ?? "",
       jsonMode: true,
       maxTokens: 900,
-      timeoutMs: 10_000,
-      purpose: "grounding.verify",
+      timeoutMs: 12_000,
+      purpose: input.task === "reasoning" ? "grounding.judge" : "grounding.verify",
       requestId: input.requestId,
       userHash: input.userHash,
       messages: [
@@ -143,4 +146,30 @@ ${sourceBlock(input.chunks)}
   } catch {
     return { text: abstain, source_chunk_ids: [], abstained: true, verified: false };
   }
+}
+
+/**
+ * What a learner actually sees: generate, verify, regenerate once on failure, then abstain by
+ * teaching straight from the source text.
+ */
+export async function generateGroundedActivity(
+  input: Parameters<typeof generateActivity>[0],
+  onCheck?: (check: VerifyResult & { attempt: number; type: string }) => Promise<void> | void,
+): Promise<Activity> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const activity = await generateActivity(input);
+    if (activity.grounded === "verified") return activity;
+    const check = await verifyClaims({
+      claims: claimsFromActivity(activity),
+      chunks: input.chunks,
+      strictness: input.config.grounding.verifier,
+      requestId: input.requestId,
+      userHash: input.userHash,
+      // Strict mode checks with the larger model. It also spreads load across per-model rate limits.
+      task: input.config.grounding.verifier === "strict" ? "reasoning" : "fast",
+    });
+    await onCheck?.({ ...check, attempt, type: activity.type });
+    if (check.ok) return { ...activity, grounded: check.checked ? "verified" : "unverified" };
+  }
+  return { ...fallbackActivity(input), grounded: "abstained" };
 }

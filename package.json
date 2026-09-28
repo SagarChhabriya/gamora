@@ -14,7 +14,9 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check:m2": "node scripts/m2-check.mjs",
-    "eval:roman-urdu": "node scripts/roman-urdu-bakeoff.mjs"
+    "eval:roman-urdu": "node scripts/roman-urdu-bakeoff.mjs",
+    "test:eval": "vitest run --config vitest.eval.config.ts && vitest run tests/policy.test.ts",
+    "check:m3": "node scripts/m3-check.mjs"
   },
   "dependencies": {
     "@upstash/ratelimit": "^2.0.7",

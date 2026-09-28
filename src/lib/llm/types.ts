@@ -51,6 +51,8 @@ export class LLMProviderError extends Error {
     message: string,
     readonly provider: string,
     readonly retryable = false,
+    /** Provider-suggested wait before retrying, for rate limits. */
+    readonly retryAfterMs?: number,
   ) {
     super(message);
     this.name = "LLMProviderError";

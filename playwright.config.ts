@@ -11,5 +11,6 @@ export default defineConfig({
     url: "http://localhost:3000",
     reuseExistingServer: !process.env.CI,
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  // PW_CHANNEL=chrome uses an installed Chrome when the bundled browser cannot be downloaded.
+  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"], ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}) } }],
 });

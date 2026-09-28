@@ -66,3 +66,18 @@ body {
     transition-duration: 1ms !important;
   }
 }
+
+@media print {
+  header,
+  nav,
+  .print\:hidden {
+    display: none !important;
+  }
+  body {
+    background: #fff;
+    color: #000;
+  }
+  article header {
+    display: block !important;
+  }
+}

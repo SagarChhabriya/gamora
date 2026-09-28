@@ -1,0 +1,76 @@
+{
+  "date": "2026-09-28T14:40:16.133Z",
+  "model_fast": "openai/gpt-oss-20b",
+  "activities": {
+    "claims": 30,
+    "unsupported": 0,
+    "grounding_rate": 1,
+    "unsupported_claim_rate": 0,
+    "perActivity": [
+      {
+        "type": "explain_ask",
+        "claims": 6,
+        "unsupported": 0,
+        "grounded": "verified"
+      },
+      {
+        "type": "scenario",
+        "claims": 3,
+        "unsupported": 0,
+        "grounded": "verified"
+      },
+      {
+        "type": "spot_error",
+        "claims": 3,
+        "unsupported": 0,
+        "grounded": "verified"
+      },
+      {
+        "type": "ordering",
+        "claims": 2,
+        "unsupported": 0,
+        "grounded": "verified"
+      },
+      {
+        "type": "teach_back",
+        "claims": 4,
+        "unsupported": 0,
+        "grounded": "verified"
+      },
+      {
+        "type": "scenario",
+        "claims": 3,
+        "unsupported": 0,
+        "grounded": "verified"
+      },
+      {
+        "type": "explain_ask",
+        "claims": 1,
+        "unsupported": 0,
+        "grounded": "verified"
+      },
+      {
+        "type": "spot_error",
+        "claims": 3,
+        "unsupported": 0,
+        "grounded": "verified"
+      },
+      {
+        "type": "roleplay",
+        "claims": 2,
+        "unsupported": 0,
+        "grounded": "verified"
+      },
+      {
+        "type": "explain_ask",
+        "claims": 3,
+        "unsupported": 0,
+        "grounded": "verified"
+      }
+    ]
+  },
+  "questions": {
+    "in_scope_answered": 0.9,
+    "out_of_scope_abstained": 1
+  }
+}

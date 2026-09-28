@@ -127,7 +127,12 @@ export async function generateWithFallback(
         const started = Date.now();
         try {
           const response = await provider.generate({ ...request, model });
-          const result = { ...response, fallbackUsed: position > 0 };
+          // House style: no em dashes in anything a learner reads.
+          const result = {
+            ...response,
+            text: response.text.replace(/\s*—\s*/g, ", "),
+            fallbackUsed: position > 0,
+          };
           record({
             request_id: requestId,
             user_hash: request.userHash,
@@ -177,6 +182,15 @@ export async function generateWithFallback(
           const retryable =
             !(error instanceof LLMProviderError) || error.retryable;
           if (!retryable) break;
+          // Short rate-limit windows are cheaper to wait out than to fall back from.
+          if (
+            error instanceof LLMProviderError &&
+            error.retryAfterMs &&
+            error.retryAfterMs <= 4_000 &&
+            attempt === 0
+          ) {
+            await sleep(error.retryAfterMs + 150);
+          }
         }
       }
     }

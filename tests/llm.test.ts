@@ -87,3 +87,11 @@ describe("LLM helpers", () => {
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("groq"))).toBe(false);
   });
 });
+
+describe("rate limit handling", () => {
+  it("reads the provider's suggested wait", async () => {
+    const { retryAfterMs } = await import("@/lib/llm/http");
+    expect(retryAfterMs(new Response("", { status: 429 }), "Please try again in 2.2275s.")).toBeCloseTo(2227.5);
+    expect(retryAfterMs(new Response("", { status: 429, headers: { "retry-after": "3" } }), "")).toBe(3000);
+  });
+});

@@ -4,13 +4,13 @@ import type { AuthUser } from "@/lib/auth/server";
 import { getActiveConfig } from "@/lib/config/active";
 import { personas, type ActivityType, type AppConfig, type Persona } from "@/lib/config/schema";
 import { applyRewards, badgeCatalog, emptyGamification, type GamificationRow } from "@/lib/gamification/rewards";
-import { answerQuestion, claimsFromActivity, verifyClaims } from "@/lib/grounding/verify";
+import { answerQuestion, generateGroundedActivity } from "@/lib/grounding/verify";
 import { detectLanguage } from "@/lib/ingest/language";
 import { applyEvidence, decayed, emptyMastery, type MasteryRow } from "@/lib/learner-model/mastery";
 import { kvDel, kvGet, kvSet } from "@/lib/llm/cache";
 import { logEvent } from "@/lib/observability/events";
 import { supabaseRequest } from "@/lib/supabase/server";
-import { fallbackActivity, generateActivity, toClientActivity } from "@/lib/tutor/activity";
+import { toClientActivity } from "@/lib/tutor/activity";
 import { evaluateAnswer, type LearnerAnswer } from "@/lib/tutor/evaluate";
 import { decide, initialPolicyState } from "@/lib/tutor/policy";
 import { retrieveForConcept } from "@/lib/tutor/retrieval";
@@ -210,29 +210,20 @@ async function buildActivity(ctx: Ctx, state: SessionState, index: number): Prom
     userHash: ctx.user.userHash,
   };
   const started = Date.now();
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const activity = await generateActivity(input);
-    if (activity.grounded === "verified") return { activity, chunks };
-    const check = await verifyClaims({
-      claims: claimsFromActivity(activity),
-      chunks,
-      strictness: ctx.config.grounding.verifier,
-      requestId: ctx.requestId,
-      userHash: ctx.user.userHash,
-    });
-    await logEvent({
+  const activity = await generateGroundedActivity(input, (check) =>
+    logEvent({
       request_id: ctx.requestId,
       user_hash: ctx.user.userHash,
       type: "grounding.check",
       latency_ms: Date.now() - started,
       ok: check.ok,
-      payload: { activity_type: activity.type, checked: check.checked, unsupported: check.unsupported.length, attempt, strictness: ctx.config.grounding.verifier },
-    });
-    if (check.ok) return { activity: { ...activity, grounded: check.checked ? "verified" : "unverified" }, chunks };
+      payload: { activity_type: check.type, checked: check.checked, unsupported: check.unsupported.length, attempt: check.attempt, strictness: ctx.config.grounding.verifier },
+    }).then(() => undefined),
+  );
+  if (activity.grounded === "abstained") {
+    await logEvent({ request_id: ctx.requestId, user_hash: ctx.user.userHash, type: "grounding.abstain", payload: { concept_id: concept.id } });
   }
-  // Two failed verifications: abstain from generated facts and teach straight from the source text.
-  await logEvent({ request_id: ctx.requestId, user_hash: ctx.user.userHash, type: "grounding.abstain", payload: { concept_id: concept.id } });
-  return { activity: { ...fallbackActivity(input), grounded: "abstained" }, chunks };
+  return { activity, chunks };
 }
 
 async function allChunks(ids: string[]) {
