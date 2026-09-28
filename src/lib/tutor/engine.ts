@@ -572,7 +572,7 @@ export async function* runTurn(user: AuthUser, body: TurnRequest, requestId: str
     state,
     persona: state.persona,
     evidence: state.evidence,
-    last: activity.type === "reflection" ? { correct: false, partial: false, hints: 0, responseMs: 0, replyWords: 0, selfCorrected: false, overconfident: evaluation.signals.some((signal) => signal.signal === "overconfident") } : {
+    last: activity.type === "reflection" ? undefined : {
       correct,
       partial: evaluation.correctness >= 0.4 && !correct,
       hints: state.hints_used,
@@ -594,6 +594,11 @@ export async function* runTurn(user: AuthUser, body: TurnRequest, requestId: str
   if (decision.override && nextIndex < state.queue.length && config.mechanics.enabled_activities.includes(decision.override)) {
     const upcoming = state.queue[nextIndex];
     if (["explain_ask", "teach_back"].includes(upcoming.type)) state.queue[nextIndex] = { ...upcoming, type: decision.override, intent: "guided practice with choices" };
+  }
+  // A confident reflection that does not match the evidence schedules a revisit (policy rule 7).
+  if (activity.type === "reflection" && evaluation.signals.some((signal) => signal.signal === "overconfident")) {
+    decision.revisit = activity.concept_id;
+    decision.reasons.push({ code: "revisit", text: "I will bring this idea back once more later, so it sticks." });
   }
   if (decision.revisit && config.mechanics.enabled_activities.includes("spaced_recall")) {
     state.queue.push({ type: "spaced_recall", concept_id: decision.revisit, intent: "revisit after overconfidence" });
