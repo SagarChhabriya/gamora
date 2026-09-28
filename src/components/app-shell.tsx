@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { AccountMenu } from "@/components/account-menu";
+import { AssistantWidget } from "@/components/assistant-widget";
 import { useSession } from "@/lib/auth/client";
 import type { SessionPayload } from "@/lib/auth/supabase-auth";
 import { cx } from "@/components/ui";
@@ -117,13 +118,14 @@ export function AppShell({ children, requireRole, wide }: Props) {
           </nav>
         </div>
       </header>
-      <main id="main" className={cx("mx-auto px-4 py-8 sm:px-8", wide ? "max-w-[1440px]" : "max-w-6xl")}>
+      <main id="main" className={cx("mx-auto px-4 pb-24 pt-8 sm:px-8", wide ? "max-w-[1440px]" : "max-w-6xl")}>
         {requireRole === "admin" && session.user.role !== "admin" ? (
           <p role="alert">This area is for Gamora admins.</p>
         ) : (
           children(session)
         )}
       </main>
+      <AssistantWidget />
     </div>
   );
 }

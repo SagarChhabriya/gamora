@@ -4,6 +4,7 @@ import { GET as adminAnalytics } from "@/app/api/admin/analytics/route";
 import { GET as adminConfig, POST as saveConfig } from "@/app/api/admin/config/route";
 import { GET as adminExport } from "@/app/api/admin/export/route";
 import { POST as llmCheck } from "@/app/api/admin/llm-check/route";
+import { POST as assistant } from "@/app/api/assistant/route";
 import { GET as contents } from "@/app/api/contents/route";
 import { GET as ingestOptions, POST as ingest } from "@/app/api/ingest/route";
 import { GET as journeys, POST as createJourney } from "@/app/api/journeys/route";
@@ -27,6 +28,7 @@ const withToken = (path: string, init: RequestInit = {}) =>
 describe("every protected route rejects anonymous and forged callers", () => {
   const cases: Array<[string, () => Promise<Response>]> = [
     ["POST /api/ingest", () => ingest(request("/api/ingest", { method: "POST", body: "{}" }))],
+    ["POST /api/assistant", () => assistant(withToken("/api/assistant", { method: "POST", body: JSON.stringify({ message: "hi" }) }))],
     ["GET /api/contents", () => contents(request("/api/contents"))],
     ["GET /api/contents?scope=all", () => contents(withToken("/api/contents?scope=all"))],
     ["GET /api/ingest", () => ingestOptions(withToken("/api/ingest"))],
