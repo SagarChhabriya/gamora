@@ -1,4 +1,3 @@
-import { PDFParse } from "pdf-parse";
 import mammoth from "mammoth";
 
 import { assertSafeRemoteUrl, cleanSourceText } from "@/lib/ingest/security";
@@ -18,6 +17,9 @@ export async function parseFile(file: File) {
 
   if (file.type === "application/pdf" || name.endsWith(".pdf")) {
     if (data.subarray(0, 5).toString() !== "%PDF-") throw new Error("Invalid PDF file");
+    // Loaded only for PDFs: pdfjs needs native canvas helpers that text and URL ingest never should.
+    ensurePdfGlobals();
+    const { PDFParse } = await import("pdf-parse");
     const parser = new PDFParse({ data });
     try {
       return cleanSourceText((await parser.getText()).text);
@@ -52,4 +54,37 @@ export async function parseRemoteSource(value: string) {
     throw new Error("Remote source must be text or HTML");
   }
   return parseTextSource(await response.text());
+}
+
+/**
+ * pdfjs references DOMMatrix when it loads. Text extraction never renders, so when the native canvas
+ * helper is unavailable a minimal identity matrix is enough to let the module load.
+ */
+function ensurePdfGlobals() {
+  const scope = globalThis as Record<string, unknown>;
+  if (typeof scope.DOMMatrix === "undefined") {
+    scope.DOMMatrix = class DOMMatrix {
+      a = 1;
+      b = 0;
+      c = 0;
+      d = 1;
+      e = 0;
+      f = 0;
+      multiplySelf() {
+        return this;
+      }
+      preMultiplySelf() {
+        return this;
+      }
+      translate() {
+        return this;
+      }
+      scale() {
+        return this;
+      }
+      invertSelf() {
+        return this;
+      }
+    };
+  }
 }

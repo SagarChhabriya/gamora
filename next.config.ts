@@ -21,7 +21,14 @@ const nextConfig: NextConfig = {
   devIndicators: false,
   poweredByHeader: false,
   // pdfjs loads its worker file at runtime, which breaks when bundled.
-  serverExternalPackages: ["pdf-parse"],
+  serverExternalPackages: ["pdf-parse", "@napi-rs/canvas"],
+  // pdfjs requires @napi-rs/canvas dynamically, so file tracing misses it. Include it for ingest.
+  outputFileTracingIncludes: {
+    "/api/ingest": [
+      "./node_modules/.pnpm/@napi-rs+canvas@*/node_modules/@napi-rs/canvas/**/*",
+      "./node_modules/.pnpm/@napi-rs+canvas-linux-x64-gnu@*/**/*",
+    ],
+  },
   async headers() {
     return [
       {
