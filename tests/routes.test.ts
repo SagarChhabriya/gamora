@@ -5,7 +5,7 @@ import { GET as adminConfig, POST as saveConfig } from "@/app/api/admin/config/r
 import { GET as adminExport } from "@/app/api/admin/export/route";
 import { POST as llmCheck } from "@/app/api/admin/llm-check/route";
 import { GET as contents } from "@/app/api/contents/route";
-import { POST as ingest } from "@/app/api/ingest/route";
+import { GET as ingestOptions, POST as ingest } from "@/app/api/ingest/route";
 import { GET as journeys, POST as createJourney } from "@/app/api/journeys/route";
 import { DELETE as deleteMe, GET as profile } from "@/app/api/profile/route";
 import { POST as turn } from "@/app/api/tutor/turn/route";
@@ -29,6 +29,7 @@ describe("every protected route rejects anonymous and forged callers", () => {
     ["POST /api/ingest", () => ingest(request("/api/ingest", { method: "POST", body: "{}" }))],
     ["GET /api/contents", () => contents(request("/api/contents"))],
     ["GET /api/contents?scope=all", () => contents(withToken("/api/contents?scope=all"))],
+    ["GET /api/ingest", () => ingestOptions(withToken("/api/ingest"))],
     ["GET /api/journeys", () => journeys(request("/api/journeys"))],
     ["POST /api/journeys", () => createJourney(withToken("/api/journeys", { method: "POST", body: "{}" }))],
     ["POST /api/tutor/turn", () => turn(withToken("/api/tutor/turn", { method: "POST", body: "{}" }))],

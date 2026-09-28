@@ -9,6 +9,7 @@ import { ConceptGraph } from "@/components/concept-graph";
 import { useToast } from "@/components/toast";
 import { Alert, Button, Card, Eyebrow, Field, Input, Textarea, cx } from "@/components/ui";
 import { authFetch } from "@/lib/auth/client";
+import { isAllowedHost } from "@/lib/ingest/security";
 
 type Mode = "text" | "url" | "file";
 type Job = { id: string; content_id: string; step: string; status: string; progress: number; error: string | null; batch: number | null; batches: number | null };
@@ -23,7 +24,7 @@ type ContentRow = { id: string; title: string; status: string; language: string 
 
 const modes: Array<{ id: Mode; label: string; hint: string }> = [
   { id: "text", label: "Paste text", hint: "Drop in a policy, procedure, or note." },
-  { id: "url", label: "Use a URL", hint: "Fetch a public HTTP or HTTPS page." },
+  { id: "url", label: "Use a URL", hint: "Fetch a public web page from a supported site." },
   { id: "file", label: "Upload file", hint: "PDF, DOCX, TXT, or Markdown up to 10 MB." },
 ];
 
@@ -56,6 +57,7 @@ function Studio() {
   const [contents, setContents] = useState<ContentRow[]>([]);
   const [building, setBuilding] = useState(false);
   const [inspecting, setInspecting] = useState<string | null>(null);
+  const [urlDomains, setUrlDomains] = useState<string[] | null>(null);
   const debugRef = useRef<HTMLElement>(null);
   const toast = useToast();
 
@@ -68,6 +70,10 @@ function Studio() {
     // Initial fetch of the learner's sources for the list below the form.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadContents();
+    void authFetch("/api/ingest")
+      .then(async (response) => (response.ok ? ((await response.json()) as { url_domains: string[] }).url_domains : null))
+      .then(setUrlDomains)
+      .catch(() => setUrlDomains(null));
   }, [loadContents]);
 
   async function loadDebug(contentId: string) {
@@ -124,6 +130,12 @@ function Studio() {
         body.set("file", file);
         init = { method: "POST", body };
       } else {
+        if (mode === "url" && urlDomains) {
+          const host = URL.canParse(url) ? new URL(url).hostname : "";
+          if (host && !isAllowedHost(host, urlDomains)) {
+            throw new Error(`${host} is not on the list of supported sites. Copy the text and use Paste text instead.`);
+          }
+        }
         init = {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -131,12 +143,12 @@ function Studio() {
         };
       }
       const response = await authFetch("/api/ingest", init);
-      const payload = (await response.json()) as { content_id?: string; job?: Job; error?: string; injection_flags?: string[]; duplicate?: boolean };
+      const payload = (await response.json().catch(() => ({}))) as { content_id?: string; job?: Job; error?: string; injection_flags?: string[]; duplicate?: boolean };
       if (!response.ok || !payload.content_id || !payload.job) {
         throw new Error(
           payload.injection_flags?.length
             ? "This source contains text that looks like instructions to an AI, so it was not processed."
-            : (payload.error ?? "Upload failed"),
+            : (payload.error ?? `Upload failed (HTTP ${response.status})`),
         );
       }
       setUploading(false);
@@ -244,7 +256,14 @@ function Studio() {
               <Textarea aria-label="Source text" value={text} onChange={(event) => setText(event.target.value)} required rows={8} placeholder="Paste the source material here..." />
             )}
             {mode === "url" && (
-              <Input aria-label="Source URL" value={url} onChange={(event) => setUrl(event.target.value)} required type="url" placeholder="https://example.com/policy" />
+              <div className="space-y-2">
+                <Input aria-label="Source URL" value={url} onChange={(event) => setUrl(event.target.value)} required type="url" placeholder="https://en.wikipedia.org/wiki/Linear_regression" />
+                {urlDomains?.length ? (
+                  <p className="text-xs leading-5 text-ink/60">
+                    Supported sites: {urlDomains.join(", ")}. Sites like Medium or LinkedIn block automated readers, so paste their text instead.
+                  </p>
+                ) : null}
+              </div>
             )}
             {mode === "file" && (
               <label className="flex min-h-36 cursor-pointer flex-col items-center justify-center border border-dashed border-ink/35 bg-paper px-5 text-center hover:border-accent">
@@ -317,6 +336,7 @@ function Studio() {
       {toast.view}
       <section className="space-y-4 border-t border-ink/15 pt-8">
         <h2 className="text-xl font-semibold">Your sources</h2>
+        <p className="-mt-2 text-sm text-ink/60">Only you see your sources. Sources your L&amp;D team shares with everyone are marked.</p>
         {contents.length === 0 ? (
           <p className="text-sm text-ink/60">Nothing yet. Add your first source above.</p>
         ) : (
@@ -326,6 +346,7 @@ function Studio() {
                 <div>
                   <p className="font-semibold">{content.title}</p>
                   <p className="text-xs text-ink/55">
+                    {content.mine ? "" : "Shared by your L&D team / "}
                     {content.status} / {content.chunk_count} sources / {content.language ?? "unknown"}
                   </p>
                 </div>
@@ -336,7 +357,6 @@ function Studio() {
                   {content.mine ? (
                     <Button variant="ghost" onClick={() => void removeSource(content)} aria-label={`Remove ${content.title}`}>
                       Remove
-        <p className="-mt-2 text-sm text-ink/60">Only you see your sources. Sources your L&amp;D team shares with everyone are marked.</p>
                     </Button>
                   ) : null}
                   {content.journey_id ? (
@@ -346,7 +366,6 @@ function Studio() {
                   ) : content.status === "ready" ? (
                     <Button variant="secondary" onClick={() => buildJourney(content.id)} disabled={building}>
                       Build journey
-                    {content.mine ? "" : "Shared by your L&D team / "}
                     </Button>
                   ) : null}
                 </div>

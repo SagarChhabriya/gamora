@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { chunkText } from "@/lib/ingest/chunk";
-import { assertSafeRemoteUrl, scanForPromptInjection } from "@/lib/ingest/security";
+import { RemoteSourceError, parseRemoteSource } from "@/lib/ingest/parse";
+import { assertSafeRemoteUrl, isAllowedHost, scanForPromptInjection } from "@/lib/ingest/security";
 
 describe("ingestion safety", () => {
   it("chunks long source text with overlap", () => {
@@ -18,6 +19,43 @@ describe("ingestion safety", () => {
   it("blocks local and private URLs", () => {
     expect(() => assertSafeRemoteUrl("http://127.0.0.1/secret")).toThrow("Private");
     expect(() => assertSafeRemoteUrl("https://example.com/article")).not.toThrow();
+  });
+});
+
+describe("URL sources", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("allows listed domains and their subdomains only", () => {
+    expect(isAllowedHost("en.wikipedia.org", ["wikipedia.org"])).toBe(true);
+    expect(isAllowedHost("wikipedia.org", ["https://www.wikipedia.org/"])).toBe(true);
+    expect(isAllowedHost("notwikipedia.org", ["wikipedia.org"])).toBe(false);
+    expect(isAllowedHost("medium.com", ["wikipedia.org"])).toBe(false);
+    expect(isAllowedHost("medium.com", [])).toBe(true);
+  });
+
+  it("refuses sites outside the list before fetching", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(parseRemoteSource("https://medium.com/@someone/post", ["wikipedia.org"])).rejects.toMatchObject({ code: "domain_not_allowed" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reports the HTTP status the site returned", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("denied", { status: 403 })));
+    const error = await parseRemoteSource("https://en.wikipedia.org/wiki/X", ["wikipedia.org"]).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(RemoteSourceError);
+    expect(error).toMatchObject({ code: "http_error", upstreamStatus: 403 });
+    expect((error as Error).message).toContain("HTTP 403 Forbidden");
+  });
+
+  it("checks every redirect hop against the list", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 302, headers: { location: "https://evil.example/page" } })));
+    await expect(parseRemoteSource("https://en.wikipedia.org/wiki/X", ["wikipedia.org"])).rejects.toMatchObject({ code: "domain_not_allowed" });
+  });
+
+  it("reads an allowed HTML page", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("<html><body><p>Linear regression fits a line.</p></body></html>", { headers: { "content-type": "text/html" } })));
+    await expect(parseRemoteSource("https://en.wikipedia.org/wiki/X", ["wikipedia.org"])).resolves.toContain("Linear regression fits a line.");
   });
 });
 

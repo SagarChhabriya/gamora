@@ -83,6 +83,12 @@ const groups: Array<{ title: string; description: string; fields: Field[] }> = [
       { path: "grounding.verifier", label: "Verifier strictness", kind: "select", options: ["off", "lenient", "strict"] },
       { path: "grounding.abstain_message", label: "Message when material does not cover a question", kind: "text" },
       { path: "safety.blocked_topics", label: "Blocked topics (comma separated)", kind: "list" },
+      {
+        path: "content.url_domains",
+        label: "Websites allowed for URL sources",
+        kind: "list",
+        hint: "Comma separated. A domain includes its subdomains. Leave empty to allow any public site.",
+      },
       { path: "safety.tutor_rpm", label: "Tutor requests per minute per learner", kind: "number", min: 5, max: 120 },
       { path: "ui.text_only_default", label: "Start learners in text only mode", kind: "toggle" },
       { path: "ui.celebrations", label: "Celebrations on milestones", kind: "toggle" },

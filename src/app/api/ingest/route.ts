@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { requireUser } from "@/lib/auth/server";
-import { parseFile, parseRemoteSource, parseTextSource } from "@/lib/ingest/parse";
+import { getActiveConfig } from "@/lib/config/active";
+import { RemoteSourceError, parseFile, parseRemoteSource, parseTextSource } from "@/lib/ingest/parse";
 import { createIngestJob } from "@/lib/ingest/pipeline";
 import { scanForPromptInjection } from "@/lib/ingest/security";
 import { logEvent } from "@/lib/observability/events";
@@ -18,6 +19,14 @@ const bodySchema = z.object({
   text: z.string().max(1_000_000).optional(),
   url: z.string().url().optional(),
 });
+
+/** What the Studio needs to guide a URL source: the sites it may come from. Empty means any public site. */
+export async function GET(request: Request) {
+  const auth = await requireUser(request);
+  if (auth.error) return auth.error;
+  const { config } = await getActiveConfig();
+  return NextResponse.json({ url_domains: config.content.url_domains });
+}
 
 /** Creates an ingest job. The client then calls POST /api/ingest/<content_id>/step until complete. */
 export async function POST(request: Request) {
@@ -45,7 +54,8 @@ export async function POST(request: Request) {
       const body = bodySchema.parse(await request.json());
       title = body.title;
       if (body.url) {
-        text = await parseRemoteSource(body.url);
+        const { config } = await getActiveConfig();
+        text = await parseRemoteSource(body.url, config.content.url_domains);
         sourceType = "url";
       } else if (body.text) {
         text = await parseTextSource(body.text);
@@ -82,6 +92,17 @@ export async function POST(request: Request) {
       { status: created.duplicate ? 200 : 201 },
     );
   } catch (error) {
+    if (error instanceof RemoteSourceError) {
+      // The site's answer, not our failure: tell the learner exactly what came back.
+      await logEvent({
+        request_id: requestId,
+        user_hash: auth.user.userHash,
+        type: "ingest.url_failed",
+        ok: false,
+        payload: { code: error.code, upstream_status: error.upstreamStatus ?? null },
+      });
+      return NextResponse.json({ error: error.message, code: error.code, upstream_status: error.upstreamStatus ?? null }, { status: 422 });
+    }
     if (!(error instanceof z.ZodError)) reportError(error, { requestId, userHash: auth.user.userHash, area: "ingest.create" });
     const message =
       error instanceof z.ZodError ? "Invalid ingest request" : error instanceof Error ? error.message : "Ingestion failed";

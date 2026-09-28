@@ -38,3 +38,20 @@ export function assertSafeRemoteUrl(value: string) {
   }
   return url;
 }
+
+/** Normalises an admin-entered domain: lower case, no scheme, path, "www." or "*." prefix. */
+export function normaliseDomain(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/^[a-z]+:\/\//, "")
+    .replace(/\/.*$/, "")
+    .replace(/^(\*\.|www\.)/, "");
+}
+
+/** True when the host is one of the domains or a subdomain of one. An empty list allows any host. */
+export function isAllowedHost(hostname: string, domains: readonly string[]) {
+  if (!domains.length) return true;
+  const host = hostname.toLowerCase().replace(/\.$/, "");
+  return domains.map(normaliseDomain).some((domain) => domain && (host === domain || host.endsWith(`.${domain}`)));
+}

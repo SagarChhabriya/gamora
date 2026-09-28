@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { normaliseDomain } from "@/lib/ingest/security";
+
 export const activityTypes = [
   "explain_ask",
   "scenario",
@@ -30,10 +32,27 @@ export type EvidenceSignal = (typeof evidenceSignals)[number];
 export const personas = ["new_joiner", "busy_rm", "expert", "low_bandwidth"] as const;
 export type Persona = (typeof personas)[number];
 
+/** Sites that serve readable text to a plain HTTP fetch. Paywalled and script-rendered sites are left out. */
+export const defaultUrlDomains = [
+  "wikipedia.org",
+  "wikibooks.org",
+  "developer.mozilla.org",
+  "learn.microsoft.com",
+  "docs.python.org",
+  "raw.githubusercontent.com",
+  "sbp.org.pk",
+  "secp.gov.pk",
+] as const;
+
 export const appConfigSchema = z.object({
   content: z.object({
     max_upload_mb: z.number().min(1).max(10).default(10),
     allowed_sources: z.array(z.enum(["pdf", "docx", "text", "url"])).default(["pdf", "docx", "text", "url"]),
+    // Sites a URL source may come from. A domain also allows its subdomains. Empty allows any public site.
+    url_domains: z
+      .array(z.string().transform(normaliseDomain).pipe(z.string().regex(/^([a-z0-9-]+\.)+[a-z]{2,}$/, "Enter a domain like example.com")))
+      .max(50)
+      .default([...defaultUrlDomains]),
   }),
   learner: z.object({
     default_level: z.number().int().min(1).max(5).default(2),

@@ -1,6 +1,6 @@
 import mammoth from "mammoth";
 
-import { assertSafeRemoteUrl, cleanSourceText } from "@/lib/ingest/security";
+import { assertSafeRemoteUrl, cleanSourceText, isAllowedHost } from "@/lib/ingest/security";
 
 const maxBytes = 10 * 1024 * 1024;
 
@@ -43,15 +43,62 @@ export async function parseFile(file: File) {
   throw new Error("Unsupported file type");
 }
 
-export async function parseRemoteSource(value: string) {
-  const url = assertSafeRemoteUrl(value);
-  const response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(8_000) });
-  if (!response.ok) throw new Error(`Remote source returned ${response.status}`);
+/** A URL source that could not be read. Carries the site's HTTP status when there is one. */
+export class RemoteSourceError extends Error {
+  constructor(
+    message: string,
+    readonly code: "http_error" | "domain_not_allowed" | "unreachable" | "not_text" | "too_large",
+    readonly upstreamStatus?: number,
+  ) {
+    super(message);
+    this.name = "RemoteSourceError";
+  }
+}
+
+const statusText: Record<number, string> = { 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 410: "Gone", 429: "Too Many Requests" };
+
+/** Plain explanation of a failed fetch, always naming the HTTP code the site returned. */
+export function describeHttpStatus(status: number, host: string) {
+  const code = `HTTP ${status}${statusText[status] ? ` ${statusText[status]}` : ""}`;
+  if (status === 401 || status === 403) {
+    return `${host} refused the request (${code}). The site blocks automated readers or needs a sign in. Copy the article text and use Paste text instead.`;
+  }
+  if (status === 404 || status === 410) return `${host} could not find that page (${code}). Check the link and try again.`;
+  if (status === 429) return `${host} is limiting requests right now (${code}). Try again later, or paste the text instead.`;
+  if (status >= 500) return `${host} had a server error (${code}). Try again later.`;
+  return `${host} returned ${code}, so the page could not be read.`;
+}
+
+const maxRedirects = 3;
+
+/** Fetches a public page from an allowed site. Every redirect hop is checked again. */
+export async function parseRemoteSource(value: string, allowedDomains: readonly string[] = []) {
+  let url = assertSafeRemoteUrl(value);
+  let response: Response | null = null;
+  for (let hop = 0; hop <= maxRedirects; hop += 1) {
+    if (!isAllowedHost(url.hostname, allowedDomains)) {
+      throw new RemoteSourceError(
+        `${url.hostname} is not on the list of supported sites. Supported: ${allowedDomains.join(", ")}. For other sites, copy the text and use Paste text.`,
+        "domain_not_allowed",
+      );
+    }
+    try {
+      response = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(8_000), headers: { Accept: "text/html,text/plain;q=0.9,*/*;q=0.5" } });
+    } catch {
+      throw new RemoteSourceError(`Could not reach ${url.hostname}. Check the link, or paste the text instead.`, "unreachable");
+    }
+    const location = response.headers.get("location");
+    if (response.status < 300 || response.status >= 400 || !location) break;
+    if (hop === maxRedirects) throw new RemoteSourceError(`${url.hostname} redirected too many times.`, "unreachable", response.status);
+    url = assertSafeRemoteUrl(new URL(location, url).toString());
+  }
+  if (!response) throw new RemoteSourceError(`Could not reach ${url.hostname}.`, "unreachable");
+  if (!response.ok) throw new RemoteSourceError(describeHttpStatus(response.status, url.hostname), "http_error", response.status);
   const contentLength = Number(response.headers.get("content-length") ?? 0);
-  if (contentLength > maxBytes) throw new Error("Remote source exceeds the 10 MB limit");
+  if (contentLength > maxBytes) throw new RemoteSourceError("The page is larger than the 10 MB limit.", "too_large");
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("text/") && !contentType.includes("json")) {
-    throw new Error("Remote source must be text or HTML");
+    throw new RemoteSourceError("That link is not a text or HTML page. Upload the file instead.", "not_text");
   }
   const body = await response.text();
   return parseTextSource(contentType.includes("html") || /^\s*<(!doctype|html)/i.test(body) ? htmlToText(body) : body);
