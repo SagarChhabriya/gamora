@@ -27,6 +27,7 @@ const nextConfig: NextConfig = {
     "/api/ingest": [
       "./node_modules/.pnpm/@napi-rs+canvas@*/node_modules/@napi-rs/canvas/**/*",
       "./node_modules/.pnpm/@napi-rs+canvas-linux-x64-gnu@*/**/*",
+      "./node_modules/.pnpm/pdfjs-dist@*/node_modules/pdfjs-dist/legacy/build/**/*",
     ],
   },
   async headers() {
