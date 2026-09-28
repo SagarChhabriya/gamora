@@ -19,9 +19,11 @@
     "check:m3": "node scripts/m3-check.mjs"
   },
   "dependencies": {
+    "@dagrejs/dagre": "^3.1.1",
     "@sentry/nextjs": "^11.0.0",
     "@upstash/ratelimit": "^2.0.7",
     "@upstash/redis": "^1.35.6",
+    "@xyflow/react": "^12.12.0",
     "mammoth": "^1.13.0",
     "next": "16.3.6",
     "pdf-parse": "^2.4.5",
