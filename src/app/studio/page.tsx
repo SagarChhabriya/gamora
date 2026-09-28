@@ -336,6 +336,7 @@ function Studio() {
                   {content.mine ? (
                     <Button variant="ghost" onClick={() => void removeSource(content)} aria-label={`Remove ${content.title}`}>
                       Remove
+        <p className="-mt-2 text-sm text-ink/60">Only you see your sources. Sources your L&amp;D team shares with everyone are marked.</p>
                     </Button>
                   ) : null}
                   {content.journey_id ? (
@@ -345,6 +346,7 @@ function Studio() {
                   ) : content.status === "ready" ? (
                     <Button variant="secondary" onClick={() => buildJourney(content.id)} disabled={building}>
                       Build journey
+                    {content.mine ? "" : "Shared by your L&D team / "}
                     </Button>
                   ) : null}
                 </div>

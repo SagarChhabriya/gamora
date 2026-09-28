@@ -15,7 +15,7 @@ function ContentAdmin() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const response = await authFetch("/api/contents");
+    const response = await authFetch("/api/contents?scope=all");
     if (!response.ok) return setError("Could not load content");
     setContents(((await response.json()) as { contents: Content[] }).contents);
   }, []);

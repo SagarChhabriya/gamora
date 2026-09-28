@@ -7,11 +7,17 @@ export const runtime = "nodejs";
 
 type ContentRow = { id: string; owner_id: string; title: string; status: string; language: string | null; chunk_count: number; created_at: string; shared: boolean };
 
-/** Sources the learner owns, plus sources an admin shared with everyone. */
+/**
+ * Sources the user owns, plus sources an admin shared with everyone. This holds for admins too, so
+ * their own Studio and home never list other people's material. The admin content table asks for
+ * every source explicitly with ?scope=all.
+ */
 export async function GET(request: Request) {
   const auth = await requireUser(request);
   if (auth.error) return auth.error;
-  const filter = auth.user.role === "admin" ? "" : `&or=(owner_id.eq.${auth.user.id},shared.eq.true)`;
+  const wantsAll = new URL(request.url).searchParams.get("scope") === "all";
+  if (wantsAll && auth.user.role !== "admin") return NextResponse.json({ error: "Admin role required" }, { status: 403 });
+  const filter = wantsAll ? "" : `&or=(owner_id.eq.${auth.user.id},shared.eq.true)`;
   const contents = await supabaseRequest<ContentRow[]>(
     `contents?select=id,owner_id,title,status,language,chunk_count,created_at,shared${filter}&order=created_at.desc&limit=50`,
   );

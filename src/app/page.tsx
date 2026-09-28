@@ -122,7 +122,7 @@ function Home({ session }: { session: SessionPayload }) {
               <li key={item.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
                 <div>
                   <p className="font-semibold">{item.title}</p>
-                  <p className="text-xs text-ink/55">{item.shared && !item.mine ? "Shared by your L&D team" : "Your material"}</p>
+                  <p className="text-xs text-ink/55">{item.mine ? "Your material" : "Shared by your L&D team"}</p>
                 </div>
                 <Button variant="secondary" disabled={building !== null} onClick={() => build(item.id)}>
                   {building === item.id ? "Planning..." : "Start a journey"}

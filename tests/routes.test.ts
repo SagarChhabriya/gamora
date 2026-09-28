@@ -28,6 +28,7 @@ describe("every protected route rejects anonymous and forged callers", () => {
   const cases: Array<[string, () => Promise<Response>]> = [
     ["POST /api/ingest", () => ingest(request("/api/ingest", { method: "POST", body: "{}" }))],
     ["GET /api/contents", () => contents(request("/api/contents"))],
+    ["GET /api/contents?scope=all", () => contents(withToken("/api/contents?scope=all"))],
     ["GET /api/journeys", () => journeys(request("/api/journeys"))],
     ["POST /api/journeys", () => createJourney(withToken("/api/journeys", { method: "POST", body: "{}" }))],
     ["POST /api/tutor/turn", () => turn(withToken("/api/tutor/turn", { method: "POST", body: "{}" }))],
