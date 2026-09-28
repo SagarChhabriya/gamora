@@ -9,6 +9,7 @@ import { getOrCreateRequestId } from "@/lib/observability/request-id";
 import { planJourney } from "@/lib/planner/plan";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { supabaseRequest } from "@/lib/supabase/server";
+import { reportError } from "@/lib/observability/sentry";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -134,6 +135,7 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ journey_id: journeyId, planner: plan.planner }, { status: 201 });
   } catch (error) {
+    reportError(error, { requestId, userHash: auth.user.userHash, area: "journey.plan" });
     await logEvent({ request_id: requestId, user_hash: auth.user.userHash, type: "journey.created", ok: false, payload: { error: error instanceof Error ? error.message.slice(0, 200) : "unknown" } });
     return NextResponse.json({ error: "Could not plan the journey. Please try again." }, { status: 500 });
   }

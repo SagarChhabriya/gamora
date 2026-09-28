@@ -30,8 +30,15 @@ export function GET(request: Request) {
     )
       ? ("configured" as const)
       : ("missing" as const),
+    sentry: isConfigured(process.env.SENTRY_DSN)
+      ? ("configured" as const)
+      : ("missing" as const),
   };
-  const status = Object.values(checks).every((value) => value !== "missing")
+  // Sentry is optional: its absence does not degrade service.
+  const status = Object.entries(checks)
+    .filter(([key]) => key !== "sentry")
+    .map(([, value]) => value)
+    .every((value) => value !== "missing")
     ? "ok"
     : "degraded";
   const payload = healthResponseSchema.parse({

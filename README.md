@@ -17,7 +17,7 @@ Live: https://gamora-web.vercel.app
 
 ### Stack
 
-Next.js (App Router, route handlers only) and TypeScript, Tailwind, Supabase (Postgres, Auth, RLS on every table), Upstash Redis (rate limits, LLM cache, prefetch), Groq and Gemini behind a provider interface with timeout, retry, model fallback, and provider fallback. Deployed on Vercel and Supabase free tiers.
+Next.js (App Router, route handlers only) and TypeScript, Tailwind, Supabase (Postgres, Auth, RLS on every table), Upstash Redis (rate limits, LLM cache, prefetch), Sentry (errors and traces, tagged with release and request ID, no PII), Groq and Gemini behind a provider interface with timeout, retry, model fallback, and provider fallback. Deployed on Vercel and Supabase free tiers.
 
 ```
 src/app/api        route handlers (ingest, journeys, tutor/turn, voice, admin, auth)

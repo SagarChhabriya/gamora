@@ -8,6 +8,7 @@ import { scanForPromptInjection } from "@/lib/ingest/security";
 import { logEvent } from "@/lib/observability/events";
 import { getOrCreateRequestId } from "@/lib/observability/request-id";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
+import { reportError } from "@/lib/observability/sentry";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -81,6 +82,7 @@ export async function POST(request: Request) {
       { status: 201 },
     );
   } catch (error) {
+    if (!(error instanceof z.ZodError)) reportError(error, { requestId, userHash: auth.user.userHash, area: "ingest.create" });
     const message =
       error instanceof z.ZodError ? "Invalid ingest request" : error instanceof Error ? error.message : "Ingestion failed";
     return NextResponse.json({ error: message }, { status: 400 });

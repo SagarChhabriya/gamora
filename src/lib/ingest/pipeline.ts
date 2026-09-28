@@ -3,6 +3,7 @@ import { extractConcepts, linkConcepts } from "@/lib/ingest/concepts";
 import { detectLanguage } from "@/lib/ingest/language";
 import { logEvent } from "@/lib/observability/events";
 import { supabaseRequest } from "@/lib/supabase/server";
+import { reportError } from "@/lib/observability/sentry";
 
 export const ingestSteps = ["chunk", "concepts", "link", "complete"] as const;
 export type IngestStep = (typeof ingestSteps)[number];
@@ -225,6 +226,7 @@ export async function runIngestStep(job: IngestJob, context: Context) {
   } catch (error) {
     const message = error instanceof Error ? error.message.slice(0, 300) : "Ingest step failed";
     const failed = job.attempts + 1 >= MAX_ATTEMPTS;
+    reportError(error, { requestId: context.requestId, userHash: context.userHash, area: `ingest.${job.step}`, extra: { content_id: job.content_id, attempt: job.attempts + 1 } });
     await updateJob(job.id, { status: failed ? "failed" : "pending", error: message, attempts: job.attempts + 1 });
     if (failed) {
       await supabaseRequest(`contents?id=eq.${job.content_id}`, {

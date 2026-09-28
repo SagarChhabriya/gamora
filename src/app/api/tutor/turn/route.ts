@@ -5,6 +5,7 @@ import { logEvent } from "@/lib/observability/events";
 import { getOrCreateRequestId } from "@/lib/observability/request-id";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { runTurn, schedulePrefetch, TurnError, turnSchema } from "@/lib/tutor/engine";
+import { reportError } from "@/lib/observability/sentry";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -33,6 +34,7 @@ export async function POST(request: Request) {
         for await (const event of runTurn(user, body, requestId)) send(event);
       } catch (error) {
         const known = error instanceof TurnError;
+        if (!known) reportError(error, { requestId, userHash: user.userHash, area: "tutor.turn", extra: { action: body.action } });
         send({ type: "error", message: known ? error.message : "Something went wrong on our side. Please try again." });
         await logEvent({
           request_id: requestId,

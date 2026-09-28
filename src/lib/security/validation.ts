@@ -10,6 +10,7 @@ export const healthResponseSchema = z.object({
     supabase: z.enum(["configured", "missing"]),
     llm: z.enum(["configured", "missing"]),
     redis: z.enum(["configured", "missing"]),
+    sentry: z.enum(["configured", "missing"]),
   }),
 });
 
