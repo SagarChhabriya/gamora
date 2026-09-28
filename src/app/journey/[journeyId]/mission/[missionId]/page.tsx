@@ -6,19 +6,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ActivityCard, Sources, type Submit } from "@/components/activity-card";
 import { AppShell } from "@/components/app-shell";
+import { FeedbackBadge, LessonCard, LevelBar, ListenButton, Stars, StepTrail } from "@/components/learning-visuals";
 import { Button, Meter, cx } from "@/components/ui";
+import { playerLevel } from "@/lib/gamification/rewards";
 import type { MissionSummary, TurnEvent } from "@/lib/tutor/engine";
 import { streamTurn } from "@/lib/tutor/client";
+import type { HistoryItem, Position } from "@/lib/tutor/session";
 import type { ClientActivity } from "@/lib/tutor/types";
 import { useVoice } from "@/lib/voice/use-voice";
 
 type Item =
-  | { kind: "activity"; id: string; activity: ClientActivity; position: { index: number; total: number } }
-  | { kind: "learner"; id: string; text: string }
-  | { kind: "feedback"; id: string; text: string; correctness: number; sources: ClientActivity["sources"]; follow_up?: string }
-  | { kind: "character"; id: string; text: string; name: string }
-  | { kind: "hint"; id: string; text: string }
-  | { kind: "answer"; id: string; text: string; sources: ClientActivity["sources"]; abstained: boolean }
+  | (HistoryItem & { id: string })
   | { kind: "reasons"; id: string; reasons: Array<{ code: string; text: string }> }
   | { kind: "mastery"; id: string; name: string; mastery: number; delta: number }
   | { kind: "xp"; id: string; gained: number; total: number; streak: number; badges: Array<{ id: string; name: string; description: string }> }
@@ -39,7 +37,7 @@ const nextId = () => `i${(counter += 1)}`;
 function Mission() {
   const params = useParams<{ journeyId: string; missionId: string }>();
   const [items, setItems] = useState<Item[]>([]);
-  const [current, setCurrent] = useState<{ activity: ClientActivity; position: { index: number; total: number } } | null>(null);
+  const [current, setCurrent] = useState<{ activity: ClientActivity; position: Position } | null>(null);
   const [state, setState] = useState<LearnerState | null>(null);
   const [status, setStatus] = useState<string | null>("Getting your mission ready...");
   const [busy, setBusy] = useState(true);
@@ -47,7 +45,7 @@ function Mission() {
   const [question, setQuestion] = useState("");
   const [summary, setSummary] = useState<MissionSummary | null>(null);
   const [readAloud, setReadAloud] = useState(false);
-  const [contrast, setContrast] = useState(false);
+  const [stats, setStats] = useState<{ total: number; streak: number } | null>(null);
   const shownAt = useRef(0);
   const bottom = useRef<HTMLDivElement>(null);
   const started = useRef(false);
@@ -61,12 +59,20 @@ function Mission() {
         case "status":
           setStatus(event.text);
           break;
+        case "history":
+          // A reload replays the whole conversation, so nothing the learner did disappears.
+          setItems(event.items.map((item) => ({ ...item, id: nextId() })));
+          break;
         case "activity":
           setCurrent({ activity: event.activity, position: event.position });
-          push({ kind: "activity", id: nextId(), activity: event.activity, position: event.position });
+          setItems((list) =>
+            list.some((item) => item.kind === "activity" && item.activity.id === event.activity.id)
+              ? list
+              : [...list, { kind: "activity", id: nextId(), activity: event.activity, position: event.position }],
+          );
           shownAt.current = Date.now();
           setStatus(null);
-          if (readAloud) voice.speak(`${event.activity.display_text} ${event.activity.prompt}`);
+          if (readAloud) voice.speak(`${event.activity.title}. ${event.activity.display_text} ${event.activity.type === "lesson" ? "" : event.activity.prompt}`);
           break;
         case "feedback":
           push({ kind: "feedback", id: nextId(), text: event.text, correctness: event.correctness, sources: event.sources, follow_up: event.follow_up });
@@ -78,6 +84,7 @@ function Mission() {
           break;
         case "hint":
           push({ kind: "hint", id: nextId(), text: event.text });
+          if (readAloud) voice.speak(event.text);
           break;
         case "answer":
           push({ kind: "answer", id: nextId(), text: event.text, sources: event.sources, abstained: event.abstained });
@@ -91,6 +98,7 @@ function Mission() {
           for (const concept of event.concepts) push({ kind: "mastery", id: nextId(), name: concept.name, mastery: concept.mastery, delta: concept.delta });
           break;
         case "xp":
+          setStats({ total: event.total, streak: event.streak });
           if (event.gained > 0 || event.new_badges.length) push({ kind: "xp", id: nextId(), gained: event.gained, total: event.total, streak: event.streak, badges: event.new_badges });
           break;
         case "mission_complete":
@@ -133,10 +141,6 @@ function Mission() {
     bottom.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [items, summary]);
 
-  useEffect(() => {
-    document.documentElement.dataset.contrast = contrast ? "high" : "";
-  }, [contrast]);
-
   const submit: Submit = (answer) => {
     const label =
       answer.reply ??
@@ -159,7 +163,24 @@ function Mission() {
     void send({ action: "ask", question: text });
   };
 
+  const practice = () => {
+    setSummary(null);
+    setItems([]);
+    setCurrent(null);
+    void send({ action: "practice" });
+  };
+
   const textOnly = state?.text_only ?? false;
+  const canSpeak = !textOnly && voice.ttsSupported;
+  const listen = canSpeak ? (text: string) => void voice.speak(text) : undefined;
+
+  const toggleReadAloud = (on: boolean) => {
+    setReadAloud(on);
+    // Speaking inside the tap unlocks speech on mobile browsers for the replies that follow.
+    if (on) voice.speak(state?.language === "roman_ur" ? "Read aloud on hai." : "Read aloud is on.");
+    else voice.silence();
+  };
+
   const voiceButton =
     !textOnly && voice.sttSupported ? (
       <Button type="button" variant="secondary" onClick={voice.listening ? voice.stop : voice.start} aria-pressed={voice.listening} aria-label={voice.listening ? "Stop voice input" : "Answer with your voice"}>
@@ -167,17 +188,59 @@ function Mission() {
       </Button>
     ) : null;
 
+  const languageButtons = (
+    <div className="grid grid-cols-2 gap-2">
+      {(["en", "roman_ur"] as const).map((language) => (
+        <button
+          key={language}
+          type="button"
+          disabled={busy}
+          aria-pressed={state?.language === language}
+          onClick={() => void send({ action: "set_language", language })}
+          className={cx("min-h-10 border px-2 text-sm font-semibold disabled:opacity-60", state?.language === language ? "border-accent bg-accent text-paper" : "border-ink/25 bg-paper")}
+        >
+          {language === "en" ? "English" : "Roman Urdu"}
+        </button>
+      ))}
+    </div>
+  );
+
+  const readAloudToggle = (
+    <label className="flex items-center justify-between gap-3 text-sm">
+      <span>🔊 Read replies aloud</span>
+      <input type="checkbox" className="h-5 w-5 accent-[var(--accent)]" checked={readAloud && canSpeak} disabled={!canSpeak} onChange={(event) => toggleReadAloud(event.target.checked)} />
+    </label>
+  );
+
+  const level = stats ? playerLevel(stats.total) : null;
+
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_300px]">
       <section aria-label="Mission conversation" className="min-w-0 space-y-4">
-        <Link href={`/journey/${params.journeyId}`} className="text-sm font-semibold text-ink/60 hover:text-accent">
-          ← Journey map
-        </Link>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Link href={`/journey/${params.journeyId}`} className="text-sm font-semibold text-ink/60 hover:text-accent">
+            ← Journey map
+          </Link>
+          {level && stats ? <LevelBar level={level.level} into={level.into} span={level.span} streak={stats.streak} /> : null}
+        </div>
+        {current?.position.steps && !summary ? <StepTrail steps={current.position.steps} index={current.position.index} /> : null}
+
+        {/* On phones the settings column sits below the conversation, so the essentials live here. */}
+        <div className="space-y-3 border border-ink/15 bg-panel p-3 lg:hidden">
+          {languageButtons}
+          {readAloudToggle}
+          {!voice.ttsSupported ? <p className="text-xs text-ink/55">This browser cannot read aloud. Text works fully.</p> : null}
+        </div>
+
         <div aria-live="polite" className="space-y-4">
           {items.map((item) => {
             switch (item.kind) {
-              case "activity":
-                return item.activity.id === current?.activity.id && !summary ? (
+              case "activity": {
+                const active = item.activity.id === current?.activity.id && !summary;
+                if (item.activity.type === "lesson") {
+                  return <LessonCard key={item.id} activity={item.activity} active={active} busy={busy} onContinue={() => void send({ action: "continue" })} onListen={listen} />;
+                }
+                return active ? (
                   <ActivityCard
                     key={item.id}
                     activity={item.activity}
@@ -187,12 +250,14 @@ function Mission() {
                     draft={draft}
                     setDraft={setDraft}
                     voiceSlot={voiceButton}
+                    onListen={listen}
                   />
                 ) : (
                   <div key={item.id} className="border border-ink/10 bg-panel/60 p-4 text-sm text-ink/70">
-                    <strong className="text-ink">{item.activity.title}.</strong> {item.activity.prompt}
+                    <strong className="text-ink">❓ {item.activity.title}.</strong> {item.activity.prompt}
                   </div>
                 );
+              }
               case "learner":
                 return (
                   <p key={item.id} className="ml-auto max-w-[85%] bg-ink px-4 py-3 text-sm text-paper">
@@ -201,8 +266,12 @@ function Mission() {
                 );
               case "feedback":
                 return (
-                  <div key={item.id} className={cx("max-w-[92%] border-l-4 bg-paper px-4 py-3", item.correctness >= 0.8 ? "border-good" : item.correctness >= 0.4 ? "border-accent/60" : "border-accent")}>
-                    <p className="leading-7">{item.text}</p>
+                  <div key={item.id} className={cx("max-w-[92%] border-l-4 bg-paper px-4 py-3", item.correctness >= 0.8 ? "border-good" : item.correctness >= 0.4 ? "border-[#c98a2b]" : "border-accent")}>
+                    <div className="flex items-center justify-between gap-2">
+                      <FeedbackBadge correctness={item.correctness} />
+                      <ListenButton text={item.follow_up ? `${item.text} ${item.follow_up}` : item.text} onListen={listen} />
+                    </div>
+                    <p className="mt-2 leading-7">{item.text}</p>
                     {item.follow_up ? <p className="mt-2 font-semibold">{item.follow_up}</p> : null}
                     <Sources sources={item.sources} />
                   </div>
@@ -210,21 +279,27 @@ function Mission() {
               case "character":
                 return (
                   <div key={item.id} className="max-w-[88%] border border-accent/30 bg-paper px-4 py-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-accent">{item.name}</p>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-accent">🗣 {item.name}</p>
+                      <ListenButton text={item.text} onListen={listen} />
+                    </div>
                     <p className="mt-1 leading-7">{item.text}</p>
                   </div>
                 );
               case "hint":
                 return (
-                  <p key={item.id} className="max-w-[92%] border border-dashed border-ink/30 px-4 py-3 text-sm">
-                    <strong>Hint:</strong> {item.text}
+                  <p key={item.id} className="sticky-note sticky-note-1 max-w-[92%] px-4 py-3 text-sm">
+                    <strong>💡 Hint:</strong> {item.text}
                   </p>
                 );
               case "answer":
                 return (
                   <div key={item.id} className="max-w-[92%] border-l-4 border-ink/40 bg-paper px-4 py-3">
-                    {item.abstained ? <p className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/55">Not in your material</p> : null}
-                    <p className="leading-7">{item.text}</p>
+                    <div className="flex items-center justify-between gap-2">
+                      {item.abstained ? <p className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/55">Not in your material</p> : <span />}
+                      <ListenButton text={item.text} onListen={listen} />
+                    </div>
+                    <p className="mt-1 leading-7">{item.text}</p>
                     <Sources sources={item.sources} />
                   </div>
                 );
@@ -251,12 +326,12 @@ function Mission() {
                 return (
                   <div key={item.id} className="animate-rise text-sm">
                     {item.gained > 0 ? (
-                      <p className="font-semibold text-good">
-                        +{item.gained} XP / {item.total} total / {item.streak} day streak
+                      <p className="inline-block bg-good px-3 py-1 font-semibold text-paper">
+                        +{item.gained} XP{item.streak > 0 ? ` / 🔥 ${item.streak} day streak` : ""}
                       </p>
                     ) : null}
                     {item.badges.map((badge) => (
-                      <p key={badge.id} className="mt-2 inline-block border border-good bg-paper px-3 py-2">
+                      <p key={badge.id} className="mt-2 block w-fit border-2 border-good bg-paper px-3 py-2">
                         🏅 Badge unlocked: <strong>{badge.name}</strong>. {badge.description}
                       </p>
                     ))}
@@ -281,7 +356,10 @@ function Mission() {
         {summary && (
           <section className="animate-rise border-2 border-good bg-paper p-6" aria-label="Mission complete">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-good">Mission complete</p>
-            <h2 className="mt-2 text-3xl font-semibold tracking-[-0.03em]">{summary.title}</h2>
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-3xl font-semibold tracking-[-0.03em]">{summary.title}</h2>
+              <Stars count={summary.stars ?? 1} />
+            </div>
             <p className="mt-3 text-ink/75">
               Mission mastery {Math.round(summary.mastery * 100)}% / {summary.xp_earned} XP earned.
             </p>
@@ -302,23 +380,14 @@ function Mission() {
               <Link href={`/journey/${params.journeyId}`} className="inline-flex min-h-11 items-center bg-ink px-5 text-sm font-semibold text-paper hover:bg-accent">
                 Back to the journey map
               </Link>
-              {!summary.unlocked_next ? (
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    setSummary(null);
-                    setItems([]);
-                    void send({ action: "start" });
-                  }}
-                >
-                  Practice round
-                </Button>
-              ) : null}
+              <Button variant="secondary" disabled={busy} onClick={practice}>
+                {summary.unlocked_next ? "Practise again" : "Practice round"}
+              </Button>
             </div>
           </section>
         )}
 
-        {!summary && current && (
+        {!summary && current && current.activity.type !== "lesson" && (
           <form
             className="flex gap-2 border-t border-ink/15 pt-4"
             onSubmit={(event) => {
@@ -360,28 +429,16 @@ function Mission() {
           ) : (
             <p className="mt-2 text-sm text-ink/60">Loading...</p>
           )}
-          {current && !summary ? (
+          {current && !summary && current.activity.type !== "lesson" ? (
             <Button variant="secondary" className="mt-4 w-full" disabled={busy} onClick={() => void send({ action: "hint" })}>
               I would like a hint
             </Button>
           ) : null}
         </div>
 
-        <fieldset className="border border-ink/15 bg-panel p-4" disabled={busy}>
+        <fieldset className="hidden border border-ink/15 bg-panel p-4 lg:block" disabled={busy}>
           <legend className="px-1 text-xs font-semibold uppercase tracking-[0.14em] text-ink/60">Language</legend>
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            {(["en", "roman_ur"] as const).map((language) => (
-              <button
-                key={language}
-                type="button"
-                aria-pressed={state?.language === language}
-                onClick={() => void send({ action: "set_language", language })}
-                className={cx("min-h-11 border text-sm font-semibold", state?.language === language ? "border-accent bg-accent text-paper" : "border-ink/25 bg-paper")}
-              >
-                {language === "en" ? "English" : "Roman Urdu"}
-              </button>
-            ))}
-          </div>
+          <div className="mt-2">{languageButtons}</div>
         </fieldset>
 
         <fieldset className="border border-ink/15 bg-panel p-4" disabled={busy}>
@@ -407,25 +464,9 @@ function Mission() {
             Text only mode
             <input type="checkbox" className="h-5 w-5 accent-[var(--accent)]" checked={textOnly} disabled={busy} onChange={(event) => void send({ action: "set_text_only", text_only: event.target.checked })} />
           </label>
-          <label className="flex items-center justify-between gap-3">
-            Read replies aloud
-            <input
-              type="checkbox"
-              className="h-5 w-5 accent-[var(--accent)]"
-              checked={readAloud && !textOnly}
-              disabled={textOnly || !voice.ttsSupported}
-              onChange={(event) => {
-                setReadAloud(event.target.checked);
-                if (!event.target.checked) voice.silence();
-              }}
-            />
-          </label>
-          {!voice.ttsSupported ? <p className="text-xs text-ink/55">This browser cannot read aloud. Text works fully.</p> : null}
+          <div className="hidden lg:block">{readAloudToggle}</div>
+          {!voice.ttsSupported ? <p className="hidden text-xs text-ink/55 lg:block">This browser cannot read aloud. Text works fully.</p> : null}
           {readAloud && state?.language === "roman_ur" && voice.hasVoices ? <p className="text-xs text-ink/55">Roman Urdu is read by an English voice, captions stay on.</p> : null}
-          <label className="flex items-center justify-between gap-3">
-            High contrast
-            <input type="checkbox" className="h-5 w-5 accent-[var(--accent)]" checked={contrast} onChange={(event) => setContrast(event.target.checked)} />
-          </label>
         </fieldset>
       </aside>
     </div>

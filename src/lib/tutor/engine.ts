@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { AuthUser } from "@/lib/auth/server";
 import { getActiveConfig } from "@/lib/config/active";
 import { personas, type ActivityType, type AppConfig, type Persona } from "@/lib/config/schema";
-import { applyRewards, badgeCatalog, emptyGamification, type GamificationRow } from "@/lib/gamification/rewards";
+import { applyRewards, badgeCatalog, emptyGamification, starsFor, type GamificationRow } from "@/lib/gamification/rewards";
 import { answerQuestion, generateGroundedActivity } from "@/lib/grounding/verify";
 import { detectLanguage } from "@/lib/ingest/language";
 import { applyEvidence, decayed, emptyMastery, type MasteryRow } from "@/lib/learner-model/mastery";
@@ -14,11 +14,12 @@ import { toClientActivity } from "@/lib/tutor/activity";
 import { evaluateAnswer, type LearnerAnswer } from "@/lib/tutor/evaluate";
 import { decide, initialPolicyState } from "@/lib/tutor/policy";
 import { retrieveForConcept } from "@/lib/tutor/retrieval";
+import { historyFromTurns, stepKinds, withLessons, type HistoryItem, type Position, type TurnRow } from "@/lib/tutor/session";
 import type { Activity, AdaptationReason, ClientActivity, Evaluation, Language, SessionState, SourceChunk } from "@/lib/tutor/types";
 
 export const turnSchema = z.object({
   mission_id: z.string().uuid(),
-  action: z.enum(["start", "answer", "hint", "ask", "set_language", "set_persona", "set_text_only"]),
+  action: z.enum(["start", "practice", "continue", "answer", "hint", "ask", "set_language", "set_persona", "set_text_only"]),
   reply: z.string().max(2_000).optional(),
   choice_id: z.string().max(40).optional(),
   order: z.array(z.string().max(40)).max(10).optional(),
@@ -40,7 +41,8 @@ export type TurnEvent =
   | { type: "adaptation"; reasons: AdaptationReason[]; state: { difficulty: number; pace: string; modality: string; language: Language; persona: Persona; text_only: boolean } }
   | { type: "mastery"; concepts: Array<{ id: string; name: string; mastery: number; delta: number }> }
   | { type: "xp"; gained: number; total: number; streak: number; new_badges: Array<{ id: string; name: string; description: string }> }
-  | { type: "activity"; activity: ClientActivity; position: { index: number; total: number } }
+  | { type: "activity"; activity: ClientActivity; position: Position }
+  | { type: "history"; items: HistoryItem[] }
   | { type: "mission_complete"; summary: MissionSummary }
   | { type: "error"; message: string }
   | { type: "done"; session_id: string };
@@ -52,6 +54,7 @@ export type MissionSummary = {
   unlocked_next: boolean;
   threshold: number;
   xp_earned: number;
+  stars: number;
   concepts: Array<{ id: string; name: string; mastery: number }>;
 };
 
@@ -125,17 +128,22 @@ async function writeTurns(sessionId: string, turns: Array<{ role: "assistant" | 
   });
 }
 
-async function getOrCreateSession(input: { user: AuthUser; mission: Mission; journey: Journey; config: AppConfig; persona: Persona; language: Language; textOnly: boolean }) {
+/**
+ * The learner's latest session for this mission, finished or not. A finished mission stays finished
+ * across reloads; only an explicit practice request opens a new session after completion.
+ */
+async function getOrCreateSession(input: { user: AuthUser; mission: Mission; journey: Journey; config: AppConfig; persona: Persona; language: Language; textOnly: boolean; practice: boolean }) {
   const existing = await supabaseRequest<SessionRow[]>(
-    `sessions?learner_id=eq.${input.user.id}&mission_id=eq.${input.mission.id}&ended_at=is.null&select=id,state,language&order=started_at.desc&limit=1`,
+    `sessions?learner_id=eq.${input.user.id}&mission_id=eq.${input.mission.id}&select=id,state,language&order=started_at.desc&limit=1`,
   );
-  if (existing?.[0]?.state?.queue) return existing[0];
+  const latest = existing?.[0];
+  if (latest?.state?.queue && !(input.practice && latest.state.completed)) return latest;
   const state: SessionState = {
     ...initialPolicyState(input.persona, input.language, input.config),
     mission_id: input.mission.id,
     journey_id: input.journey.id,
     persona: input.persona,
-    queue: (input.mission.activities ?? []).filter((item) => input.config.mechanics.enabled_activities.includes(item.type)),
+    queue: (input.mission.activities ?? []).filter((item) => input.config.mechanics.enabled_activities.includes(item.type as ActivityType)),
     index: 0,
     current: null,
     prefetched: null,
@@ -150,6 +158,7 @@ async function getOrCreateSession(input: { user: AuthUser; mission: Mission; jou
     text_only: input.textOnly,
   };
   if (!state.queue.length) state.queue = input.mission.concept_ids.map((id) => ({ type: "explain_ask" as ActivityType, concept_id: id, intent: "introduce" }));
+  state.queue = withLessons(state.queue);
   const rows = await supabaseRequest<SessionRow[]>("sessions?select=id,state,language", {
     method: "POST",
     headers: { Prefer: "return=representation" },
@@ -247,6 +256,28 @@ function adaptationEvent(state: SessionState, reasons: AdaptationReason[]): Turn
   };
 }
 
+function positionOf(state: SessionState): Position {
+  return { index: state.index, total: state.queue.length, steps: stepKinds(state.queue) };
+}
+
+/** The conversation so far, so a reload shows everything the learner already did. */
+async function sessionHistory(sessionId: string) {
+  const turns = (await supabaseRequest<TurnRow[]>(`turns?session_id=eq.${sessionId}&select=role,activity_type,content,source_chunk_ids&order=idx.asc&limit=400`)) ?? [];
+  const chunks = await allChunks(turns.filter((turn) => !turn.content?.activity).flatMap((turn) => turn.source_chunk_ids ?? []));
+  const byId = new Map(chunks.map((chunk) => [chunk.id, chunk]));
+  return historyFromTurns(turns, (ids) =>
+    ids
+      .map((id) => byId.get(id))
+      .filter((chunk): chunk is { id: string; idx: number; text: string } => Boolean(chunk))
+      .map((chunk) => ({ id: chunk.id, label: `Source ${chunk.idx + 1}`, excerpt: chunk.text.slice(0, 280) })),
+  );
+}
+
+async function stats(learnerId: string): Promise<TurnEvent> {
+  const row = await loadGamification(learnerId);
+  return { type: "xp", gained: 0, total: row.xp, streak: row.streak, new_badges: [] };
+}
+
 async function presentActivity(ctx: Ctx, session: SessionRow, state: SessionState): Promise<TurnEvent[]> {
   const key = prefetchKey(session.id, state.index, state);
   const cached = await kvGet<{ activity: Activity; chunkIds: string[] }>(key);
@@ -270,8 +301,9 @@ async function presentActivity(ctx: Ctx, session: SessionRow, state: SessionStat
   await saveState(session.id, state);
   const sourceChunks = await allChunks([...activity.source_chunk_ids, ...chunkIds]);
   const client = toClientActivity(activity, sourceChunks);
-  await writeTurns(session.id, [{ role: "assistant", activity_type: activity.type, content: { activity: client, grounded: activity.grounded }, source_chunk_ids: activity.source_chunk_ids }]);
-  return [{ type: "activity", activity: client, position: { index: state.index, total: state.queue.length } }];
+  const position = positionOf(state);
+  await writeTurns(session.id, [{ role: "assistant", activity_type: activity.type, content: { activity: client, grounded: activity.grounded, position }, source_chunk_ids: activity.source_chunk_ids }]);
+  return [{ type: "activity", activity: client, position }];
 }
 
 /** Prefetch the next activity while the learner works on this one (architecture 7.7). */
@@ -325,7 +357,7 @@ async function missionSummary(ctx: Ctx, state: SessionState): Promise<MissionSum
   }));
   const mastery = concepts.length ? concepts.reduce((sum, concept) => sum + concept.mastery, 0) / concepts.length : 0;
   const threshold = ctx.mission.unlock_rule?.min_mastery ?? ctx.config.mastery.unlock_threshold;
-  return { mission_id: ctx.mission.id, title: ctx.mission.title, mastery, unlocked_next: mastery >= threshold, threshold, xp_earned: state.xp_earned, concepts };
+  return { mission_id: ctx.mission.id, title: ctx.mission.title, mastery, unlocked_next: mastery >= threshold, threshold, xp_earned: state.xp_earned, stars: starsFor(mastery, threshold, ctx.config), concepts };
 }
 
 async function countMastered(learnerId: string, config: AppConfig) {
@@ -387,21 +419,23 @@ export async function* runTurn(user: AuthUser, body: TurnRequest, requestId: str
   const language: Language = journey.language === "roman_ur" || profileRows?.[0]?.language_pref === "roman_ur" ? "roman_ur" : "en";
   const [concepts, session] = await Promise.all([
     loadConcepts([...mission.concept_ids, ...(mission.activities ?? []).map((item) => item.concept_id)]),
-    getOrCreateSession({ user, mission, journey, config, persona, language, textOnly: persona === "low_bandwidth" || config.ui.text_only_default }),
+    getOrCreateSession({ user, mission, journey, config, persona, language, textOnly: persona === "low_bandwidth" || config.ui.text_only_default, practice: body.action === "practice" }),
   ]);
   const ctx: Ctx = { user, requestId, config, journey, mission, concepts };
   const state = session.state;
 
-  if (body.action === "start") {
+  if (body.action === "start" || body.action === "practice") {
+    const [history, xp] = await Promise.all([sessionHistory(session.id), stats(user.id)]);
+    yield xp;
+    if (history.length) yield { type: "history", items: history };
     if (state.completed) {
+      yield adaptationEvent(state, []);
       yield { type: "mission_complete", summary: await missionSummary(ctx, state) };
     } else if (state.current) {
       const sources = await allChunks(state.current.source_chunk_ids);
       yield adaptationEvent(state, []);
-      yield { type: "activity", activity: toClientActivity(state.current, sources), position: { index: state.index, total: state.queue.length } };
-      for (const turn of state.roleplay_turns.filter((item) => item.role === "character").slice(1)) {
-        yield { type: "character", text: turn.text, name: state.current.roleplay?.character ?? "" };
-      }
+      // The history already holds this activity and its replies; this event makes it the active card.
+      yield { type: "activity", activity: toClientActivity(state.current, sources), position: positionOf(state) };
     } else {
       yield { type: "status", text: "Preparing your first activity..." };
       yield adaptationEvent(state, []);
@@ -446,6 +480,20 @@ export async function* runTurn(user: AuthUser, body: TurnRequest, requestId: str
     return;
   }
 
+  if (body.action === "continue") {
+    // The learner finished reading a lesson. Lessons are never scored, so no evidence or XP.
+    if (!state.current || state.current.type !== "lesson" || state.completed) throw new TurnError("Nothing to continue here. Reload the mission.");
+    await writeTurns(session.id, [{ role: "learner", activity_type: "lesson", content: { continue: true } }]);
+    state.index += 1;
+    if (state.index >= state.queue.length) for (const event of await completeMission(ctx, session, state)) yield event;
+    else {
+      yield { type: "status", text: state.language === "roman_ur" ? "Aapka check tayyar ho raha hai..." : "Preparing your check..." };
+      for (const event of await presentActivity(ctx, session, state)) yield event;
+    }
+    yield { type: "done", session_id: session.id };
+    return;
+  }
+
   if (body.action === "hint") {
     const activity = state.current;
     if (!activity) throw new TurnError("No active activity");
@@ -478,6 +526,7 @@ export async function* runTurn(user: AuthUser, body: TurnRequest, requestId: str
   // action === "answer"
   const activity = state.current;
   if (!activity || state.completed) throw new TurnError("No active activity. Start the mission first.");
+  if (activity.type === "lesson") throw new TurnError("This step is a lesson. Tap Got it to continue.");
   const answer: LearnerAnswer = { reply: body.reply, choice_id: body.choice_id, order: body.order, confidence: body.confidence };
   const activityConcept = concepts.get(activity.concept_id) ?? (await loadConcepts([activity.concept_id])).get(activity.concept_id);
   if (!activityConcept) throw new TurnError("Concept not found for this activity");
@@ -520,7 +569,20 @@ export async function* runTurn(user: AuthUser, body: TurnRequest, requestId: str
   const replyText = body.reply ?? "";
   await writeTurns(session.id, [
     { role: "learner", activity_type: activity.type, content: { reply: replyText.slice(0, 2_000), choice_id: body.choice_id, order: body.order, confidence: body.confidence } },
-    { role: "assistant", activity_type: `${activity.type}.feedback`, content: { feedback: evaluation.feedback_text, correctness: evaluation.correctness, signals: evaluation.signals }, source_chunk_ids: evaluation.source_chunk_ids, latency_ms: Date.now() - started },
+    {
+      role: "assistant",
+      activity_type: `${activity.type}.feedback`,
+      content: {
+        feedback: evaluation.feedback_text,
+        correctness: evaluation.correctness,
+        signals: evaluation.signals,
+        follow_up: evaluation.follow_up,
+        // A role-play reply that is not the debrief is the character speaking, not feedback.
+        character: activity.type === "roleplay" && !evaluation.done ? (activity.roleplay?.character ?? "") : undefined,
+      },
+      source_chunk_ids: evaluation.source_chunk_ids,
+      latency_ms: Date.now() - started,
+    },
   ]);
 
   if (activity.type === "roleplay" && !evaluation.done) {

@@ -49,7 +49,7 @@ export async function POST(request: Request) {
     },
   });
 
-  if (body.action === "start" || body.action === "answer" || body.action === "set_language" || body.action === "set_persona") {
+  if (["start", "practice", "continue", "answer", "set_language", "set_persona"].includes(body.action)) {
     after(() => schedulePrefetch(user, body.mission_id, requestId));
   }
 

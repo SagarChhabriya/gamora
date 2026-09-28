@@ -5,9 +5,10 @@ import { z } from "zod";
 import type { ActivityType, AppConfig, Persona } from "@/lib/config/schema";
 import { repairJson } from "@/lib/llm/json";
 import { generateWithFallback } from "@/lib/llm/router";
-import { tutorSystemPrompt } from "@/lib/tutor/prompts";
+import { detectLanguage } from "@/lib/ingest/language";
+import { languageRule, tutorSystemPrompt } from "@/lib/tutor/prompts";
 import { refsToIds, sourceBlock } from "@/lib/tutor/retrieval";
-import type { Activity, ClientActivity, Language, Modality, Pace, SourceChunk } from "@/lib/tutor/types";
+import type { Activity, ClientActivity, Language, Modality, Pace, SourceChunk, StepType } from "@/lib/tutor/types";
 
 const refList = z.array(z.string()).default([]);
 
@@ -38,8 +39,8 @@ const shapes: Record<ActivityType, string> = {
 const difficultyText = (level: number) =>
   ["very simple, everyday words", "simple and supportive", "moderate, some nuance", "challenging, includes edge cases", "expert level, tricky edge cases and exceptions"][Math.max(0, Math.min(4, level - 1))];
 
-export async function generateActivity(input: {
-  type: ActivityType;
+export type ActivityInput = {
+  type: StepType;
   concept: { id: string; name: string; summary: string };
   chunks: SourceChunk[];
   difficulty: number;
@@ -53,24 +54,32 @@ export async function generateActivity(input: {
   config: AppConfig;
   requestId?: string;
   userHash?: string;
-}): Promise<Activity> {
+};
+
+/** True when Roman Urdu was asked for but the text came back plainly English. */
+export function missedLanguage(language: Language, text: string) {
+  return language === "roman_ur" && detectLanguage(text) === "en";
+}
+
+const retryInRomanUrdu = "Your previous reply was in English. Write the same JSON again with every learner-facing field in Roman Urdu.";
+
+async function generateActivityOnce(input: ActivityInput & { type: ActivityType }, retry: boolean): Promise<Activity> {
   const { type, concept, chunks, config } = input;
-  try {
-    const response = await generateWithFallback({
-      task: "fast",
-      model: process.env.LLM_FAST_MODEL ?? "",
-      jsonMode: true,
-      maxTokens: 1_800,
-      timeoutMs: 15_000,
-      temperature: 0.5,
-      purpose: `activity.${type}`,
-      requestId: input.requestId,
-      userHash: input.userHash,
-      messages: [
-        { role: "system", content: tutorSystemPrompt({ config, persona: input.persona, language: input.language, pace: input.pace }) },
-        {
-          role: "user",
-          content: `Create a ${type} activity for the concept "${concept.name}" (${concept.summary.slice(0, 200)}).
+  const response = await generateWithFallback({
+    task: "fast",
+    model: process.env.LLM_FAST_MODEL ?? "",
+    jsonMode: true,
+    maxTokens: 1_800,
+    timeoutMs: 15_000,
+    temperature: 0.5,
+    purpose: `activity.${type}`,
+    requestId: input.requestId,
+    userHash: input.userHash,
+    messages: [
+      { role: "system", content: tutorSystemPrompt({ config, persona: input.persona, language: input.language, pace: input.pace }) },
+      {
+        role: "user",
+        content: `Create a ${type} activity for the concept "${concept.name}" (${concept.summary.slice(0, 200)}).
 Difficulty ${input.difficulty}/5: ${difficultyText(input.difficulty)}. Pace: ${input.pace}. ${input.intent ? `Intent: ${input.intent}.` : ""}
 ${input.workedExample ? "The learner struggled just now. Start display_text with a short worked example from the source before the question.\n" : ""}${input.learnerContext ? `Learner context (reuse their words when helpful): ${input.learnerContext.slice(0, 300)}\n` : ""}
 ${shapes[type]}
@@ -78,20 +87,90 @@ Return JSON with: "title" (3 to 6 words), "display_text", "prompt", "hints" (2 h
 Use only facts from the source chunks. Cite refs exactly as given (S1, S2...).
 <source>
 ${sourceBlock(chunks)}
-</source>`,
-        },
-      ],
-    });
-    return buildActivity(input, repairJson<Record<string, unknown>>(response.text));
+</source>
+${languageRule(input.language)}${retry ? `\n${retryInRomanUrdu}` : ""}`,
+      },
+    ],
+  });
+  return buildActivity(input, repairJson<Record<string, unknown>>(response.text));
+}
+
+/** Generates one step. Retries once when Roman Urdu was asked for and English came back. */
+export async function generateActivity(input: ActivityInput): Promise<Activity> {
+  try {
+    let activity = await generateStep(input, false);
+    if (missedLanguage(input.language, `${activity.display_text} ${activity.prompt}`)) activity = await generateStep(input, true);
+    return activity;
   } catch {
     return fallbackActivity(input);
   }
 }
 
-function buildActivity(
-  input: Parameters<typeof generateActivity>[0],
-  raw: Record<string, unknown>,
-): Activity {
+function generateStep(input: ActivityInput, retry: boolean) {
+  return input.type === "lesson" ? generateLesson(input, retry) : generateActivityOnce({ ...input, type: input.type }, retry);
+}
+
+const lessonSchema = z.object({
+  title: z.string().min(1).max(120),
+  key_idea: z.string().min(1).max(400),
+  notes: z.array(z.string().min(1).max(200)).min(1).max(4),
+  flow: z.array(z.string().min(1).max(120)).max(6).default([]),
+  example: z.string().max(500).default(""),
+  source_refs: refList,
+});
+
+const lessonPrompt = (language: Language) =>
+  language === "roman_ur" ? "Samajh aa gaya? Ab ek chhota sa check karte hain." : "Got it? Next comes a quick check of what you just learned.";
+
+/** A short visual lesson that teaches the concept before any question about it. */
+async function generateLesson(input: ActivityInput, retry: boolean): Promise<Activity> {
+  const { concept, chunks, config } = input;
+  const response = await generateWithFallback({
+    task: "fast",
+    model: process.env.LLM_FAST_MODEL ?? "",
+    jsonMode: true,
+    maxTokens: 1_200,
+    timeoutMs: 15_000,
+    temperature: 0.4,
+    purpose: "activity.lesson",
+    requestId: input.requestId,
+    userHash: input.userHash,
+    messages: [
+      { role: "system", content: tutorSystemPrompt({ config, persona: input.persona, language: input.language, pace: input.pace }) },
+      {
+        role: "user",
+        content: `Teach the concept "${concept.name}" (${concept.summary.slice(0, 200)}) as a short visual lesson. This comes BEFORE any question, so teach, do not ask.
+Difficulty ${input.difficulty}/5: ${difficultyText(input.difficulty)}.
+Return JSON: {"title": 3 to 6 words, "key_idea": one sentence with the single most important idea, "notes": 2 to 4 sticky notes, each a fact a beginner must remember in at most 14 words, "flow": if the source describes a process, sequence or cause and effect, 3 to 5 short step labels in order (at most 8 words each), otherwise [], "example": one short concrete example from the source context in at most 40 words, "source_refs": ["S1"]}.
+Use only facts from the source chunks. Cite refs exactly as given (S1, S2...).
+<source>
+${sourceBlock(chunks)}
+</source>
+${languageRule(input.language)}${retry ? `\n${retryInRomanUrdu}` : ""}`,
+      },
+    ],
+  });
+  const raw = lessonSchema.parse(repairJson<unknown>(response.text));
+  const cited = refsToIds(raw.source_refs, chunks);
+  const refs = raw.source_refs.length ? raw.source_refs : chunks.slice(0, 1).map((chunk) => chunk.ref);
+  return {
+    id: randomUUID(),
+    type: "lesson",
+    concept_id: concept.id,
+    concept_name: concept.name,
+    difficulty: input.difficulty,
+    title: raw.title,
+    display_text: raw.key_idea,
+    prompt: lessonPrompt(input.language),
+    hints: [],
+    expected_points: raw.notes.map((text) => ({ text, refs })),
+    source_chunk_ids: cited.length ? cited : chunks.slice(0, 2).map((chunk) => chunk.id),
+    grounded: "unverified",
+    lesson: { key_idea: raw.key_idea, notes: raw.notes, flow: raw.flow.length >= 3 ? raw.flow.slice(0, 5) : [], example: raw.example },
+  };
+}
+
+function buildActivity(input: ActivityInput & { type: ActivityType }, raw: Record<string, unknown>): Activity {
   const base = baseSchema.parse(raw);
   const { chunks, concept, type } = input;
   const cited = refsToIds([...base.source_refs, ...base.expected_points.flatMap((point) => point.refs)], chunks);
@@ -135,10 +214,28 @@ function buildActivity(
 }
 
 /** Deterministic activity from the concept summary. Used when every provider fails. */
-export function fallbackActivity(input: Parameters<typeof generateActivity>[0]): Activity {
+export function fallbackActivity(input: ActivityInput): Activity {
   const { concept, chunks, language } = input;
   const ur = language === "roman_ur";
-  const excerpt = chunks[0]?.text.split(/(?<=[.!?])\s+/).slice(0, 2).join(" ") ?? concept.summary;
+  const sentences = chunks[0]?.text.split(/(?<=[.!?])\s+/) ?? [];
+  const excerpt = sentences.length ? sentences.slice(0, 2).join(" ") : concept.summary;
+  if (input.type === "lesson") {
+    return {
+      id: randomUUID(),
+      type: "lesson",
+      concept_id: concept.id,
+      concept_name: concept.name,
+      difficulty: input.difficulty,
+      title: concept.name.slice(0, 60),
+      display_text: concept.summary,
+      prompt: lessonPrompt(language),
+      hints: [],
+      expected_points: [],
+      source_chunk_ids: chunks.slice(0, 2).map((chunk) => chunk.id),
+      grounded: "verified",
+      lesson: { key_idea: concept.summary, notes: (sentences.length ? sentences.slice(0, 3) : [concept.summary]).map((text) => text.slice(0, 200)), flow: [], example: "" },
+    };
+  }
   const reflection = input.type === "reflection";
   return {
     id: randomUUID(),

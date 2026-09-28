@@ -32,6 +32,8 @@ export function claimsFromActivity(activity: Activity) {
     ...(activity.options ?? []).filter((option) => option.correct).map((option) => `${option.text}. ${option.consequence}`),
     ...(activity.steps ?? []).filter((step) => step.is_error && step.fix).map((step) => step.fix as string),
     ...(activity.items ?? []).length ? [`Correct order: ${(activity.items ?? []).map((item) => item.text).join(" then ")}`] : [],
+    ...(activity.lesson?.flow.length ? [`In order: ${activity.lesson.flow.join(" then ")}`] : []),
+    ...(activity.lesson?.example ? [activity.lesson.example] : []),
   ];
   return claims.filter((claim) => claim && claim.trim().length > 12).slice(0, 8);
 }

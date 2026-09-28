@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { ListenButton } from "@/components/learning-visuals";
 import { Button, cx } from "@/components/ui";
 import type { ClientActivity } from "@/lib/tutor/types";
 
@@ -51,6 +52,7 @@ export function ActivityCard({
   draft,
   setDraft,
   voiceSlot,
+  onListen,
 }: {
   activity: ClientActivity;
   position: { index: number; total: number };
@@ -59,6 +61,7 @@ export function ActivityCard({
   draft: string;
   setDraft: (value: string) => void;
   voiceSlot?: React.ReactNode;
+  onListen?: (text: string) => void;
 }) {
   const [order, setOrder] = useState(() => (activity.items ?? []).map((item) => item.id));
   const [confidence, setConfidence] = useState<number | null>(null);
@@ -80,15 +83,22 @@ export function ActivityCard({
     <article className="animate-rise border border-ink/20 bg-panel p-5 sm:p-6" aria-labelledby={`activity-${activity.id}`}>
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold uppercase tracking-[0.14em]">
         <span className="text-accent">
-          {typeLabels[activity.type] ?? activity.type} / {position.index + 1} of {position.total}
+          ❓ {typeLabels[activity.type] ?? activity.type} / step {position.index + 1} of {position.total}
         </span>
         <span className="text-ink/55">
           Level {activity.difficulty} / {groundingLabels[activity.grounded]}
         </span>
       </div>
-      <h2 id={`activity-${activity.id}`} className="mt-3 text-2xl font-semibold tracking-[-0.02em]">
-        {activity.title}
-      </h2>
+      <div className="mt-3 flex items-start justify-between gap-3">
+        <h2 id={`activity-${activity.id}`} className="text-2xl font-semibold tracking-[-0.02em]">
+          {activity.title}
+        </h2>
+        <ListenButton
+          className="shrink-0"
+          onListen={onListen}
+          text={[activity.display_text, activity.prompt, ...(activity.options ?? []).map((option, index) => `${String.fromCharCode(65 + index)}. ${option.text}`)].join(" ")}
+        />
+      </div>
       <p className="mt-3 whitespace-pre-line text-base leading-7">{activity.display_text}</p>
       {activity.roleplay ? (
         <p className="mt-3 border-l-2 border-accent pl-3 text-sm text-ink/70">

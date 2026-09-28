@@ -4,6 +4,16 @@ export type Language = "en" | "roman_ur";
 export type Pace = "brisk" | "normal" | "gentle";
 export type Modality = "open" | "choices";
 
+/** A lesson teaches a concept before any question about it. It is not evaluated. */
+export type StepType = ActivityType | "lesson";
+
+export type Lesson = {
+  key_idea: string;
+  notes: string[];
+  flow: string[];
+  example: string;
+};
+
 export type SourceChunk = { id: string; idx: number; text: string; ref: string };
 
 export type ExpectedPoint = { text: string; refs: string[] };
@@ -11,7 +21,7 @@ export type ExpectedPoint = { text: string; refs: string[] };
 /** Full activity as stored on the server. Contains answers, never sent to the client as is. */
 export type Activity = {
   id: string;
-  type: ActivityType;
+  type: StepType;
   concept_id: string;
   concept_name: string;
   difficulty: number;
@@ -27,6 +37,7 @@ export type Activity = {
   roleplay?: { character: string; situation: string; opening: string; max_turns: number };
   grounded: "verified" | "unverified" | "abstained";
   worked_example?: string;
+  lesson?: Lesson;
 };
 
 /** What the browser receives. Answers are removed. */
@@ -66,7 +77,7 @@ export type SessionState = PolicyState & {
   mission_id: string;
   journey_id: string;
   persona: Persona;
-  queue: Array<{ type: ActivityType; concept_id: string; intent: string }>;
+  queue: Array<{ type: StepType; concept_id: string; intent: string }>;
   index: number;
   current: Activity | null;
   prefetched: Activity | null;

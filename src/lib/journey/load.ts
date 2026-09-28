@@ -64,7 +64,8 @@ export async function loadJourneyView(journeyId: string, learnerId: string, conf
       }
     }
     if (status !== "locked") {
-      if (completed && !open) status = avg >= threshold ? "completed" : "practice";
+      // Completion is permanent. A practice round opened later does not undo it.
+      if (completed) status = avg >= threshold ? "completed" : "practice";
       else if (open) status = "in_progress";
     }
     const queueLength = open?.state?.queue?.length ?? mission.activities.length;

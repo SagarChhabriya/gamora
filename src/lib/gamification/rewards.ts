@@ -96,3 +96,17 @@ export function applyRewards(row: GamificationRow, event: RewardEvent, config: A
     newBadges,
   };
 }
+
+export const XP_PER_LEVEL = 200;
+
+/** Player level from total XP. Flat steps keep the next level always in sight. */
+export function playerLevel(xp: number) {
+  const total = Math.max(0, Math.floor(xp));
+  return { level: Math.floor(total / XP_PER_LEVEL) + 1, into: total % XP_PER_LEVEL, span: XP_PER_LEVEL };
+}
+
+/** Stars for a finished mission: 3 at the mastered threshold, 2 at the unlock threshold, else 1. */
+export function starsFor(mastery: number, unlockThreshold: number, config: AppConfig) {
+  if (mastery >= config.mastery.mastered_threshold) return 3;
+  return mastery >= unlockThreshold ? 2 : 1;
+}

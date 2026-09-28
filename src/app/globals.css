@@ -88,3 +88,25 @@ label:has(input[type="file"]) {
     display: block !important;
   }
 }
+
+.sticky-note {
+  color: var(--foreground);
+}
+.sticky-note-1 {
+  background: #fbe7a1;
+}
+.sticky-note-2 {
+  background: #f9d3c4;
+}
+.sticky-note-3 {
+  background: #cfe8d3;
+}
+.sticky-note-4 {
+  background: #d4e3f3;
+}
+:root[data-contrast="high"] .sticky-note {
+  background: var(--background);
+  border: 2px solid var(--foreground);
+  box-shadow: none;
+  transform: none;
+}
