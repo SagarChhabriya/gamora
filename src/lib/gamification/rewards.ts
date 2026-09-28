@@ -15,7 +15,7 @@ export const badgeCatalog: Record<string, { name: string; description: string }>
   first_steps: { name: "First Steps", description: "Completed your first mission." },
   sharp_eye: { name: "Sharp Eye", description: "Spotted 3 procedure slips." },
   self_corrector: { name: "Second Look", description: "Fixed your own answer 3 times." },
-  explainer: { name: "The Explainer", description: "Taught a concept back to a colleague." },
+  explainer: { name: "The Explainer", description: "Taught a concept back to a friend." },
   cool_head: { name: "Cool Head", description: "Handled a role-play conversation well." },
   steady: { name: "Steady Hand", description: "Learned on 3 days in a row." },
   mastery_3: { name: "Solid Ground", description: "Mastered 3 concepts." },

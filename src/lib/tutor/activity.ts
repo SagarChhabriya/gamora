@@ -27,13 +27,13 @@ const stepSchema = z.object({ text: z.string().max(300), is_error: z.boolean(), 
 
 const shapes: Record<ActivityType, string> = {
   explain_ask: `A short micro-lesson (display_text) followed by one natural open question (prompt) that asks the learner to explain or apply the idea in their own words.`,
-  scenario: `A realistic workplace situation (display_text) and a decision (prompt) with exactly 3 "options". Exactly one option is correct per the source. Each option has a "consequence" that says what the source requires or warns about for that choice. Do not invent outcomes, penalties, numbers, or reactions that the source does not state; if the source is silent, say the choice does or does not follow the policy and why. Add "options":[{"text","correct":boolean,"consequence"}].`,
-  spot_error: `A short story of a colleague following a procedure (display_text). Add "steps":[{"text","is_error":boolean,"fix"}] with 4 or 5 steps in order, exactly one step is wrong compared to the source, and "fix" states the correct action for that step using the source's own facts. prompt asks the learner to find the step that went wrong.`,
+  scenario: `A realistic situation from the material's own setting (display_text) and a decision (prompt) with exactly 3 "options". Exactly one option is correct per the source. Each option has a "consequence" that says what the source requires or warns about for that choice. Do not invent outcomes, penalties, numbers, or reactions that the source does not state; if the source is silent, say the choice does or does not follow the policy and why. Add "options":[{"text","correct":boolean,"consequence"}].`,
+  spot_error: `A short story of someone applying the idea step by step (display_text). Add "steps":[{"text","is_error":boolean,"fix"}] with 4 or 5 steps in order, exactly one step is wrong compared to the source, and "fix" states the correct action for that step using the source's own facts. prompt asks the learner to find the step that went wrong.`,
   ordering: `A situation where steps must happen in the right order (display_text). Add "items":["step text", ...] with 3 to 5 steps in the correct order from the source. prompt asks the learner to put them in order.`,
-  roleplay: `A role-play. Add "roleplay":{"character": a realistic name and role (for example a customer), "situation": one sentence the learner sees, "opening": the character's first line, in character}. The character behaves only as the source facts allow and never reveals the correct procedure. display_text sets the scene for the learner. prompt tells the learner what to aim for.`,
-  teach_back: `A friendly colleague who half understands the concept asks the learner to explain it (display_text in the colleague's voice). prompt invites the explanation. expected_points lists what a complete explanation covers.`,
+  roleplay: `A role-play. Add "roleplay":{"character": a realistic name and a role that fits the material (for example a friend, client, classmate or patient), "situation": one sentence the learner sees, "opening": the character's first line, in character}. The character behaves only as the source facts allow and never reveals the right answer. display_text sets the scene for the learner. prompt tells the learner what to aim for.`,
+  teach_back: `A friend who half understands the concept asks the learner to explain it (display_text in the friend's voice). prompt invites the explanation. expected_points lists what a complete explanation covers.`,
   spaced_recall: `A quick story beat that makes the learner recall this earlier concept without feeling tested (display_text), then one open question (prompt).`,
-  reflection: `A short, warm reflection moment (display_text) and a prompt asking how confident the learner feels about the concept and one thing they would do differently at work. expected_points can be empty.`,
+  reflection: `A short, warm reflection moment (display_text) and a prompt asking how confident the learner feels about the concept and one thing they would do differently next time they use it. expected_points can be empty.`,
 };
 
 const difficultyText = (level: number) =>
@@ -250,8 +250,8 @@ export function fallbackActivity(input: ActivityInput): Activity {
         ? `Aap "${concept.name}" ke baare mein kitna confident mehsoos karte hain, 1 se 5?`
         : `How confident do you feel about "${concept.name}", from 1 to 5?`
       : ur
-        ? "Apne alfaaz mein batayein, kaam par aap is ko kaise apply karenge?"
-        : "In your own words, how would you apply this at work?",
+        ? "Apne alfaaz mein batayein, aap is ko asal zindagi mein kahan use karenge?"
+        : "In your own words, where would you use this in real life?",
     hints: [ur ? "Source ki pehli line dobara parhein." : "Re-read the first line of the source.", concept.summary.slice(0, 200)],
     expected_points: [{ text: concept.summary.slice(0, 300), refs: chunks[0] ? [chunks[0].ref] : [] }],
     source_chunk_ids: chunks.slice(0, 2).map((chunk) => chunk.id),

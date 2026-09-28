@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import type { AuthUser } from "@/lib/auth/server";
 import { getActiveConfig } from "@/lib/config/active";
-import { personas, type ActivityType, type AppConfig, type Persona } from "@/lib/config/schema";
+import { personaLabels, personas, type ActivityType, type AppConfig, type Persona } from "@/lib/config/schema";
 import { applyRewards, badgeCatalog, emptyGamification, starsFor, type GamificationRow } from "@/lib/gamification/rewards";
 import { answerQuestion, generateGroundedActivity } from "@/lib/grounding/verify";
 import { detectLanguage } from "@/lib/ingest/language";
@@ -459,7 +459,7 @@ export async function* runTurn(user: AuthUser, body: TurnRequest, requestId: str
       state.difficulty = fresh.difficulty;
       state.pace = fresh.pace;
       state.text_only = body.persona === "low_bandwidth" ? true : state.text_only;
-      reasons.push({ code: "persona_switch", text: `Adapting for ${body.persona.replace("_", " ")}: level ${fresh.difficulty}, ${fresh.pace} pace.` });
+      reasons.push({ code: "persona_switch", text: `Adapting for ${personaLabels[body.persona].toLowerCase()}: level ${fresh.difficulty}, ${fresh.pace} pace.` });
       await supabaseRequest(`profiles?id=eq.${user.id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ persona: body.persona }) });
     }
     if (body.action === "set_text_only" && typeof body.text_only === "boolean" && body.text_only !== state.text_only) {

@@ -23,7 +23,7 @@ type Debug = {
 type ContentRow = { id: string; title: string; status: string; language: string | null; chunk_count: number; created_at: string; journey_id: string | null; mine: boolean; shared: boolean };
 
 const modes: Array<{ id: Mode; label: string; hint: string }> = [
-  { id: "text", label: "Paste text", hint: "Drop in a policy, procedure, or note." },
+  { id: "text", label: "Paste text", hint: "Drop in notes, an article, or a chapter." },
   { id: "url", label: "Use a URL", hint: "Fetch a public web page from a supported site." },
   { id: "file", label: "Upload file", hint: "PDF, DOCX, TXT, or Markdown up to 10 MB." },
 ];
@@ -232,7 +232,7 @@ function Studio() {
         <Card>
           <form onSubmit={submit} className="space-y-5">
             <Field label="Source title">
-              <Input value={title} onChange={(event) => setTitle(event.target.value)} required maxLength={200} placeholder="e.g. Branch fraud response policy" />
+              <Input value={title} onChange={(event) => setTitle(event.target.value)} required maxLength={200} placeholder="e.g. Photosynthesis, chapter 3" />
             </Field>
             <div className="grid grid-cols-3 border-b border-ink/20" role="tablist" aria-label="Source type">
               {modes.map((item) => (
@@ -336,7 +336,7 @@ function Studio() {
       {toast.view}
       <section className="space-y-4 border-t border-ink/15 pt-8">
         <h2 className="text-xl font-semibold">Your sources</h2>
-        <p className="-mt-2 text-sm text-ink/60">Only you see your sources. Sources your L&amp;D team shares with everyone are marked.</p>
+        <p className="-mt-2 text-sm text-ink/60">Only you see your sources. Sources from the shared Gamora library are marked.</p>
         {contents.length === 0 ? (
           <p className="text-sm text-ink/60">Nothing yet. Add your first source above.</p>
         ) : (
@@ -346,7 +346,7 @@ function Studio() {
                 <div>
                   <p className="font-semibold">{content.title}</p>
                   <p className="text-xs text-ink/55">
-                    {content.mine ? "" : "Shared by your L&D team / "}
+                    {content.mine ? "" : "Gamora library / "}
                     {content.status} / {content.chunk_count} sources / {content.language ?? "unknown"}
                   </p>
                 </div>

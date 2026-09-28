@@ -6,14 +6,14 @@ import { AdminNav } from "@/components/admin-nav";
 import { AppShell } from "@/components/app-shell";
 import { Alert, Button, Card, Eyebrow, Textarea, cx } from "@/components/ui";
 import { authFetch } from "@/lib/auth/client";
-import { activityTypes, type AppConfig } from "@/lib/config/schema";
+import { activityTypes, personaLabels, personas, type AppConfig } from "@/lib/config/schema";
 
 type Version = { version: number; note: string | null; is_active: boolean; created_at: string; author: string; diff: Array<{ path: string; from: unknown; to: unknown }> };
 type Payload = { active: AppConfig; active_version: number; defaults: AppConfig; versions: Version[] };
 
 type Field =
   | { path: string; label: string; kind: "number"; min: number; max: number; step?: number; hint?: string }
-  | { path: string; label: string; kind: "select"; options: string[]; hint?: string }
+  | { path: string; label: string; kind: "select"; options: string[]; labels?: Record<string, string>; hint?: string }
   | { path: string; label: string; kind: "toggle"; hint?: string }
   | { path: string; label: string; kind: "text"; hint?: string }
   | { path: string; label: string; kind: "multi"; options: string[]; hint?: string }
@@ -25,7 +25,7 @@ const groups: Array<{ title: string; description: string; fields: Field[] }> = [
     description: "Who the default learner is and how the tutor speaks.",
     fields: [
       { path: "learner.default_level", label: "Default starting level", kind: "number", min: 1, max: 5 },
-      { path: "learner.default_persona", label: "Default learner type", kind: "select", options: ["new_joiner", "busy_rm", "expert", "low_bandwidth"] },
+      { path: "learner.default_persona", label: "Default learner type", kind: "select", options: [...personas], labels: personaLabels },
       { path: "learner.session_minutes", label: "Default session length (minutes)", kind: "number", min: 3, max: 120 },
       { path: "learner.minutes_per_mission", label: "Minutes per mission", kind: "number", min: 2, max: 30 },
       { path: "language.default", label: "Default language", kind: "select", options: ["en", "roman_ur"] },
@@ -128,7 +128,7 @@ function FieldControl({ field, value, onChange }: { field: Field; value: unknown
         <select id={id} value={String(value)} onChange={(event) => onChange(event.target.value)} className={input}>
           {field.options.map((option) => (
             <option key={option} value={option}>
-              {option.replace(/_/g, " ")}
+              {field.labels?.[option] ?? option.replace(/_/g, " ")}
             </option>
           ))}
         </select>

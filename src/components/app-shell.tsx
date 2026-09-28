@@ -119,7 +119,7 @@ export function AppShell({ children, requireRole, wide }: Props) {
       </header>
       <main id="main" className={cx("mx-auto px-4 py-8 sm:px-8", wide ? "max-w-[1440px]" : "max-w-6xl")}>
         {requireRole === "admin" && session.user.role !== "admin" ? (
-          <p role="alert">This area is for admins. Ask your L&amp;D team for access.</p>
+          <p role="alert">This area is for Gamora admins.</p>
         ) : (
           children(session)
         )}

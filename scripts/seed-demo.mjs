@@ -92,12 +92,12 @@ const adminPassword = process.env.DEMO_ADMIN_PASSWORD ?? password();
 const learnerPassword = process.env.DEMO_LEARNER_PASSWORD ?? password();
 const adminEmail = "panel-admin@gamora.demo";
 const learnerEmail = "panel-learner@gamora.demo";
-const adminId = await ensureUser(adminEmail, adminPassword, "L&D Admin");
+const adminId = await ensureUser(adminEmail, adminPassword, "Gamora Admin");
 const learnerId = await ensureUser(learnerEmail, learnerPassword, "Panel Learner");
-await rest(`profiles?id=eq.${adminId}`, { method: "PATCH", body: JSON.stringify({ role: "admin", display_name: "L&D Admin", onboarding: { role: "L&D", completed_at: new Date().toISOString() } }) });
+await rest(`profiles?id=eq.${adminId}`, { method: "PATCH", body: JSON.stringify({ role: "admin", display_name: "Gamora Admin", onboarding: { role: "Admin", completed_at: new Date().toISOString() } }) });
 await rest(`profiles?id=eq.${learnerId}`, {
   method: "PATCH",
-  body: JSON.stringify({ display_name: "Panel Learner", persona: "new_joiner", language_pref: "en", time_budget_min: 15, onboarding: { role: "Branch teller", goal: "Handle real customer situations confidently", prior: "new", time: "15", language: "en", completed_at: new Date().toISOString() } }),
+  body: JSON.stringify({ display_name: "Panel Learner", persona: "new_joiner", language_pref: "en", time_budget_min: 15, onboarding: { role: "Student", goal: "Understand the basics", prior: "new", time: "15", language: "en", completed_at: new Date().toISOString() } }),
 });
 // The panel learner always starts the demo fresh: no sessions, mastery, evidence, or XP.
 for (const table of ["sessions", "mastery", "evidence_events", "gamification"]) {
@@ -141,7 +141,7 @@ if (!reset && demoProfiles.length >= 20) {
     const inserted = await rest("missions?select=id,idx,concept_ids,activities", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify(missions.map((mission) => ({ ...mission, journey_id: journey }))) });
     inserted.sort((a, b) => a.idx - b.idx);
 
-    // Skill and drop-off vary by learner. Experts start stronger, busy RMs drop off more.
+    // Skill and drop-off vary by learner. Experts start stronger, learners short on time drop off more.
     const skill = persona === "expert" ? 0.8 : persona === "new_joiner" ? 0.45 : 0.6;
     const stamina = persona === "busy_rm" ? 0.55 : 0.85;
     const userHash = createHash("sha256").update(`gamora:${id}`).digest("hex").slice(0, 32);

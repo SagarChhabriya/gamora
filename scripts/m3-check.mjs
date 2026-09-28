@@ -71,7 +71,7 @@ try {
   const onboard = await fetch(`${base}/api/profile`, {
     method: "PATCH",
     headers: { ...auth, "Content-Type": "application/json" },
-    body: JSON.stringify({ persona: "new_joiner", language_pref: "en", time_budget_min: 10, onboarding: { role: "Branch teller", goal: "Handle real situations", prior: "new", time: "10", language: "en" } }),
+    body: JSON.stringify({ persona: "new_joiner", language_pref: "en", time_budget_min: 10, onboarding: { role: "Student", goal: "Handle real situations", prior: "new", time: "10", language: "en" } }),
   });
   console.log(`onboarding ${onboard.status}`);
 

@@ -32,6 +32,14 @@ export type EvidenceSignal = (typeof evidenceSignals)[number];
 export const personas = ["new_joiner", "busy_rm", "expert", "low_bandwidth"] as const;
 export type Persona = (typeof personas)[number];
 
+/** What learners see. The ids above are stored in profiles and configs, so they stay stable. */
+export const personaLabels: Record<Persona, string> = {
+  new_joiner: "Beginner",
+  busy_rm: "Short on time",
+  expert: "Experienced",
+  low_bandwidth: "Slow connection",
+};
+
 /** Sites that serve readable text to a plain HTTP fetch. Paywalled and script-rendered sites are left out. */
 export const defaultUrlDomains = [
   "wikipedia.org",

@@ -8,6 +8,7 @@ import { ActivityCard, Sources, type Submit } from "@/components/activity-card";
 import { AppShell } from "@/components/app-shell";
 import { FeedbackBadge, LessonCard, LevelBar, ListenButton, Stars, StepTrail } from "@/components/learning-visuals";
 import { Button, Meter, cx } from "@/components/ui";
+import { personaLabels, personas } from "@/lib/config/schema";
 import { playerLevel } from "@/lib/gamification/rewards";
 import type { MissionSummary, TurnEvent } from "@/lib/tutor/engine";
 import { streamTurn } from "@/lib/tutor/client";
@@ -24,12 +25,7 @@ type Item =
 
 type LearnerState = { difficulty: number; pace: string; modality: string; language: "en" | "roman_ur"; persona: string; text_only: boolean };
 
-const personaOptions = [
-  { id: "new_joiner", label: "New joiner" },
-  { id: "busy_rm", label: "Busy RM" },
-  { id: "expert", label: "Expert" },
-  { id: "low_bandwidth", label: "Low bandwidth" },
-];
+const personaOptions = personas.map((id) => ({ id, label: personaLabels[id] }));
 
 let counter = 0;
 const nextId = () => `i${(counter += 1)}`;
@@ -449,7 +445,7 @@ function Mission() {
                 key={persona.id}
                 type="button"
                 aria-pressed={state?.persona === persona.id}
-                onClick={() => void send({ action: "set_persona", persona: persona.id as "new_joiner" })}
+                onClick={() => void send({ action: "set_persona", persona: persona.id })}
                 className={cx("min-h-11 border px-2 text-xs font-semibold", state?.persona === persona.id ? "border-accent bg-accent text-paper" : "border-ink/25 bg-paper")}
               >
                 {persona.label}

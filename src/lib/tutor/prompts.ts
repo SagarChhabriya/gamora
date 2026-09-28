@@ -3,16 +3,16 @@ import { romanUrduStyleGuide } from "@/lib/llm/prompts/roman-urdu";
 import type { Language, Pace } from "@/lib/tutor/types";
 
 export const audienceFor: Record<Persona, string> = {
-  new_joiner: "a new joiner who is still learning the basics",
-  busy_rm: "a busy relationship manager who wants short, practical guidance",
+  new_joiner: "a beginner who is new to this topic and needs clear basics",
+  busy_rm: "a busy learner with little time who wants short, practical guidance",
   expert: "a confident, experienced professional who wants a challenge",
-  low_bandwidth: "branch staff on a slow connection who need short text messages",
+  low_bandwidth: "a learner on a slow connection or small phone who needs short text messages",
 };
 
 const codeSwitch: Record<AppConfig["language"]["code_switch_level"], string> = {
   low: "Use mostly Roman Urdu with only essential English terms.",
   medium: "Mix Roman Urdu and English naturally, keeping technical terms in English.",
-  high: "Code-switch freely between English and Roman Urdu, the way colleagues chat.",
+  high: "Code-switch freely between English and Roman Urdu, the way friends chat.",
 };
 
 /** B0: global tutor system prompt. */
@@ -30,7 +30,7 @@ RULES
 5. Keep each message under ${maxWords} words. One idea at a time. Ask one natural question, never a quiz.
 6. Never make the learner feel tested or judged. Praise specific effort.
 7. Do not use em dashes.
-8. Training scenarios are practice, not legal or compliance advice.${blocked}
+8. Practice scenarios are for learning only, not professional, legal, medical or financial advice.${blocked}
 ${language === "roman_ur" ? `\nLANGUAGE\n${romanUrduStyleGuide}\n${codeSwitch[config.language.code_switch_level]} Politeness level: ${config.tone.formality}.` : ""}
 Return only JSON matching the schema provided.`;
 }

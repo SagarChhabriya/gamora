@@ -95,7 +95,7 @@ function AdminDashboard() {
       <AdminNav />
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <Eyebrow>L&amp;D dashboard</Eyebrow>
+          <Eyebrow>Learning dashboard</Eyebrow>
           <h1 className="mt-2 text-4xl font-semibold tracking-[-0.03em]">Learning, engagement, outcomes</h1>
         </div>
         {demoShown ? (

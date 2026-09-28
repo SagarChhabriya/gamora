@@ -18,12 +18,12 @@ type Step = {
 const steps: Step[] = [
   {
     key: "role",
-    ask: (name) => `Hi ${name}, I am Sagar, your learning guide. What do you do day to day?`,
+    ask: (name) => `Hi ${name}, I am Sagar, your learning guide. What best describes you?`,
     chips: [
-      { label: "Branch teller", value: "Branch teller" },
-      { label: "Relationship manager", value: "Relationship manager" },
-      { label: "Operations", value: "Operations officer" },
-      { label: "Just joined", value: "New joiner" },
+      { label: "Student", value: "Student" },
+      { label: "Working professional", value: "Working professional" },
+      { label: "Switching careers", value: "Career switcher" },
+      { label: "Learning for fun", value: "Curious learner" },
     ],
     free: true,
   },
@@ -31,9 +31,9 @@ const steps: Step[] = [
     key: "goal",
     ask: () => "Nice. What would you like to get better at?",
     chips: [
-      { label: "Handle real situations", value: "Handle real customer situations confidently" },
-      { label: "Pass an audit", value: "Follow policy correctly for audits" },
       { label: "Learn the basics", value: "Understand the basics" },
+      { label: "Prepare for an exam", value: "Prepare for an exam or interview" },
+      { label: "Use it for real", value: "Apply it confidently in real situations" },
     ],
     free: true,
   },
@@ -72,7 +72,7 @@ type Message = { from: "guide" | "learner"; text: string };
 function personaFrom(answers: Record<string, string>) {
   if (answers.time === "low") return "low_bandwidth";
   if (answers.prior === "confident") return "expert";
-  if (/relationship|rm\b/i.test(answers.role ?? "") || answers.time === "5") return "busy_rm";
+  if (answers.time === "5") return "busy_rm";
   return "new_joiner";
 }
 

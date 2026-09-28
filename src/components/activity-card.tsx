@@ -14,7 +14,7 @@ const typeLabels: Record<string, string> = {
   spot_error: "Spot the slip",
   ordering: "Put in order",
   roleplay: "Role-play",
-  teach_back: "Teach a colleague",
+  teach_back: "Teach a friend",
   spaced_recall: "Quick flashback",
   reflection: "Check in",
 };
@@ -202,7 +202,7 @@ export function ActivityCard({
             rows={2}
             maxLength={2_000}
             aria-label="One thing you would do differently (optional)"
-            placeholder="One thing you would do differently at work (optional)"
+            placeholder="One thing you would do differently next time (optional)"
             className="w-full border border-ink/25 bg-paper px-4 py-3 outline-none focus:border-accent"
           />
           <Button disabled={busy || confidence === null} onClick={() => onSubmit({ confidence: confidence ?? 3, reply: draft })}>
@@ -225,7 +225,7 @@ export function ActivityCard({
             rows={activity.type === "roleplay" ? 2 : 3}
             maxLength={2_000}
             aria-label="Your reply"
-            placeholder={activity.type === "roleplay" ? `Reply to ${activity.roleplay?.character ?? "the customer"}...` : "Type or speak your answer, in English or Roman Urdu..."}
+            placeholder={activity.type === "roleplay" ? `Reply to ${activity.roleplay?.character ?? "the character"}...` : "Type or speak your answer, in English or Roman Urdu..."}
             className="w-full border border-ink/25 bg-paper px-4 py-3 text-base outline-none focus:border-accent"
             onKeyDown={(event) => {
               if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && draft.trim()) onSubmit({ reply: draft.trim() });

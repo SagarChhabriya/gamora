@@ -116,10 +116,10 @@ export function fallbackPlan(title: string, concepts: PlannerConcept[], edges: P
 }
 
 const personaText: Record<Persona, string> = {
-  new_joiner: "a new joiner, beginner level, needs clear basics",
-  busy_rm: "a busy relationship manager, short on time, wants short practical steps",
+  new_joiner: "a beginner who is new to this topic, needs clear basics",
+  busy_rm: "a busy learner, short on time, wants short practical steps",
   expert: "a confident expert, skip basics, prefers challenging application",
-  low_bandwidth: "branch staff on a slow connection, text only, short messages",
+  low_bandwidth: "a learner on a slow connection or small phone, text only, short messages",
 };
 
 export async function planJourney(input: {
@@ -148,7 +148,7 @@ export async function planJourney(input: {
       purpose: "journey.plan",
       requestId: input.requestId,
       userHash: input.userHash,
-      cacheKey: `plan:v2:${input.configVersion}:${profile.persona}:${profile.time_budget_min}:${profile.language}`,
+      cacheKey: `plan:v3:${input.configVersion}:${profile.persona}:${profile.time_budget_min}:${profile.language}`,
       messages: [
         {
           role: "system",
@@ -160,7 +160,7 @@ export async function planJourney(input: {
           content: `Design a learning journey for ${personaText[profile.persona]}${profile.role ? `, role: ${profile.role}` : ""}${profile.goal ? `, goal: ${profile.goal}` : ""}.
 Time budget: ${profile.time_budget_min} minutes. Write titles and hooks in ${profile.language === "roman_ur" ? "Roman Urdu with English technical terms" : "English"}.
 Create exactly ${missions} missions with up to ${perMission} concepts each, following the concept order (earlier concepts are prerequisites).
-The story must come from the material's own subject and setting. Use the learner's role only to decide the point of view, never to change the setting: a hiring guide stays in HR, a cyber policy stays in IT, and only material about banking is set in a bank branch. Each mission is one realistic situation from that setting.
+The story must come from the material's own subject and setting. Use the learner's role only to decide the point of view, never to change the setting: a biology chapter stays in biology, a cooking guide stays in a kitchen, and a programming tutorial stays with code. Each mission is one realistic situation from that setting.
 Activity types allowed: ${enabled.join(", ")}. Start easy (explain_ask), then build to scenario, spot_error, ordering or roleplay. Vary types. Add one reflection at the end of each mission. From mission 2 on, add one spaced_recall of an earlier concept.
 Only use concept refs from the list.
 Return {"title":string,"story_theme":string,"missions":[{"title":string,"story_hook":string (2 sentences, second person),"concept_refs":["C1"],"activities":[{"type":string,"concept_ref":"C1","intent":string}]}]}
