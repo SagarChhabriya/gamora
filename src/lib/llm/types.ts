@@ -11,6 +11,16 @@ export type GenerateRequest = {
   maxTokens?: number;
   jsonMode?: boolean;
   signal?: AbortSignal;
+  timeoutMs?: number;
+  /** Short label for logs, for example "ingest.concepts". */
+  purpose?: string;
+  requestId?: string;
+  userHash?: string;
+  /** When set, identical requests are served from Redis for `cacheTtlSeconds`. */
+  cacheKey?: string;
+  cacheTtlSeconds?: number;
+  /** Provider names to treat as unavailable. Used by the outage drill. */
+  skipProviders?: string[];
 };
 
 export type GenerateResponse = {
@@ -20,6 +30,8 @@ export type GenerateResponse = {
   inputTokens?: number;
   outputTokens?: number;
   latencyMs: number;
+  cached?: boolean;
+  fallbackUsed?: boolean;
 };
 
 export type StreamChunk = {

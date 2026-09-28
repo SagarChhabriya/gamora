@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { chunkText } from "@/lib/ingest/chunk";
-import { extractConcepts } from "@/lib/ingest/concepts";
+import { requireUser } from "@/lib/auth/server";
 import { parseFile, parseRemoteSource, parseTextSource } from "@/lib/ingest/parse";
+import { createIngestJob } from "@/lib/ingest/pipeline";
 import { scanForPromptInjection } from "@/lib/ingest/security";
-import { getAuthenticatedUserId, supabaseRequest } from "@/lib/supabase/server";
+import { logEvent } from "@/lib/observability/events";
+import { getOrCreateRequestId } from "@/lib/observability/request-id";
+import { enforceRateLimit } from "@/lib/security/rate-limit";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 const bodySchema = z.object({
   title: z.string().trim().min(1).max(200),
@@ -15,9 +18,13 @@ const bodySchema = z.object({
   url: z.string().url().optional(),
 });
 
+/** Creates an ingest job. The client then calls POST /api/ingest/<content_id>/step until complete. */
 export async function POST(request: Request) {
-  const ownerId = await getAuthenticatedUserId(request);
-  if (!ownerId) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+  const requestId = getOrCreateRequestId(request.headers.get("x-request-id"));
+  const auth = await requireUser(request);
+  if (auth.error) return auth.error;
+  const limited = await enforceRateLimit(auth.user.id, "upload");
+  if (limited) return limited;
 
   try {
     let title: string;
@@ -31,7 +38,8 @@ export async function POST(request: Request) {
       const file = form.get("file");
       if (!(file instanceof File)) throw new Error("A source file is required");
       text = await parseFile(file);
-      sourceType = file.name.toLowerCase().endsWith(".pdf") ? "pdf" : file.name.toLowerCase().endsWith(".docx") ? "docx" : "text";
+      const name = file.name.toLowerCase();
+      sourceType = name.endsWith(".pdf") ? "pdf" : name.endsWith(".docx") ? "docx" : "text";
     } else {
       const body = bodySchema.parse(await request.json());
       title = body.title;
@@ -48,60 +56,33 @@ export async function POST(request: Request) {
 
     const injectionFlags = scanForPromptInjection(text);
     if (injectionFlags.length) {
-      return NextResponse.json({ error: "Source contains instruction-like text", injection_flags: injectionFlags }, { status: 422 });
-    }
-
-    const chunks = chunkText(text);
-    if (!chunks.length) throw new Error("Source produced no chunks");
-    const plan = await extractConcepts(chunks);
-    const contentRows = await supabaseRequest<Array<{ id: string }>>("contents", {
-      method: "POST",
-      headers: { Prefer: "return=representation" },
-      body: JSON.stringify({ owner_id: ownerId, title, source_type: sourceType, status: "ready", chunk_count: chunks.length }),
-    });
-    const contentId = contentRows?.[0]?.id;
-    if (!contentId) throw new Error("Supabase did not return a content ID");
-
-    const chunkRows = await supabaseRequest<Array<{ id: string; idx: number }>>("chunks", {
-      method: "POST",
-      headers: { Prefer: "return=representation" },
-      body: JSON.stringify(chunks.map((chunk) => ({ content_id: contentId, idx: chunk.index, text: chunk.text, tokens: chunk.tokens }))),
-    });
-    const chunkIds = new Map((chunkRows ?? []).map((chunk) => [chunk.idx, chunk.id]));
-    const conceptRows = plan.concepts.map((concept) => ({
-      content_id: contentId,
-      name: concept.name,
-      summary: concept.summary,
-      difficulty: concept.difficulty,
-      source_chunk_ids: concept.source_chunk_indexes.map((index) => chunkIds.get(index)).filter((id): id is string => Boolean(id)),
-    }));
-    let conceptIds: string[] = [];
-    if (conceptRows.length) {
-      const insertedConcepts = await supabaseRequest<Array<{ id: string }>>("concepts", {
-        method: "POST",
-        headers: { Prefer: "return=representation" },
-        body: JSON.stringify(conceptRows),
+      await logEvent({
+        request_id: requestId,
+        user_hash: auth.user.userHash,
+        type: "ingest.injection_blocked",
+        ok: false,
+        payload: { flags: injectionFlags },
       });
-      conceptIds = (insertedConcepts ?? []).map((concept) => concept.id);
-    }
-    const edgeRows = plan.edges
-      .map((edge) => ({
-        from_id: conceptIds[edge.from],
-        to_id: conceptIds[edge.to],
-        type: edge.type,
-      }))
-      .filter((edge) => edge.from_id && edge.to_id);
-    if (edgeRows.length) {
-      await supabaseRequest("concept_edges", {
-        method: "POST",
-        headers: { Prefer: "return=minimal" },
-        body: JSON.stringify(edgeRows),
-      });
+      return NextResponse.json(
+        { error: "Source contains instruction-like text", injection_flags: injectionFlags },
+        { status: 422 },
+      );
     }
 
-    return NextResponse.json({ content_id: contentId, chunk_count: chunks.length, concepts: plan.concepts, edges: plan.edges });
+    const created = await createIngestJob({ ownerId: auth.user.id, title, sourceType, text });
+    await logEvent({
+      request_id: requestId,
+      user_hash: auth.user.userHash,
+      type: "ingest.created",
+      payload: { content_id: created.contentId, source_type: sourceType, language: created.language, chars: text.length },
+    });
+    return NextResponse.json(
+      { content_id: created.contentId, language: created.language, job: created.job },
+      { status: 201 },
+    );
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Ingestion failed";
+    const message =
+      error instanceof z.ZodError ? "Invalid ingest request" : error instanceof Error ? error.message : "Ingestion failed";
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }

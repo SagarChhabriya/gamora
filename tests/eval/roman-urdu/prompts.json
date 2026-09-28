@@ -1,0 +1,22 @@
+[
+  { "id": "ru01", "kind": "explanation", "prompt": "Explain in Roman Urdu, in 3 short sentences, why a bank must verify a customer's identity card before opening an account." },
+  { "id": "ru02", "kind": "explanation", "prompt": "Roman Urdu mein samjhao ke KYC kya hota hai, ek naye branch employee ke liye." },
+  { "id": "ru03", "kind": "explanation", "prompt": "Explain 'structuring' of cash deposits in simple Roman Urdu. Keep banking terms in English." },
+  { "id": "ru04", "kind": "explanation", "prompt": "Roman Urdu mein batao ke suspicious transaction report kab file karni chahiye." },
+  { "id": "ru05", "kind": "explanation", "prompt": "Explain 'tipping off' to a teller in friendly Roman Urdu, 2 sentences." },
+  { "id": "ru06", "kind": "code_switching", "prompt": "Reply to this learner in the same mixed style: 'Mujhe samajh nahi aaya ke enhanced due diligence aur normal due diligence mein kya farq hai?'" },
+  { "id": "ru07", "kind": "code_switching", "prompt": "Reply naturally to: 'Agar customer ka biometric verification fail ho jaye to phir kya karna hai? Account open kar dein?'" },
+  { "id": "ru08", "kind": "code_switching", "prompt": "Reply to: 'Yaar ye OTP wali fraud calls ka kya scene hai, customer ko kaise protect karein?'" },
+  { "id": "ru09", "kind": "code_switching", "prompt": "Reply to: 'Cheque pe alteration ho to pay kar sakte hain agar amount chota ho?'" },
+  { "id": "ru10", "kind": "code_switching", "prompt": "Reply to: 'High risk customer ka review kitne time baad hota hai, mujhe yaad nahi.'" },
+  { "id": "ru11", "kind": "banking_terms", "prompt": "Use these terms naturally in one Roman Urdu paragraph: KYC, risk rating, compliance officer, PEP." },
+  { "id": "ru12", "kind": "banking_terms", "prompt": "Write a 2 sentence Roman Urdu tip about the currency transaction report threshold. Keep 'currency transaction report' in English." },
+  { "id": "ru13", "kind": "banking_terms", "prompt": "Explain 'source of funds' vs 'source of wealth' in Roman Urdu for a relationship manager." },
+  { "id": "ru14", "kind": "banking_terms", "prompt": "Roman Urdu mein batao ke deficiency sheet kya hoti hai aur account restricted mode mein kyun rehta hai." },
+  { "id": "ru15", "kind": "banking_terms", "prompt": "Describe the four fraud response steps (contain, preserve evidence, report, support customer) in Roman Urdu." },
+  { "id": "ru16", "kind": "tone", "prompt": "The learner answered a question wrongly. Give warm, non-judgmental feedback in Roman Urdu and one hint. Topic: impersonation fraud." },
+  { "id": "ru17", "kind": "tone", "prompt": "Praise a learner's specific effort in Roman Urdu after they correctly explained enhanced due diligence. One sentence, not childish." },
+  { "id": "ru18", "kind": "tone", "prompt": "Start a role-play in Roman Urdu as a slightly impatient customer who wants a large cash withdrawal quickly." },
+  { "id": "ru19", "kind": "tone", "prompt": "As a confused colleague, ask the learner in Roman Urdu to explain what a politically exposed person is." },
+  { "id": "ru20", "kind": "tone", "prompt": "Politely say in Roman Urdu that the training material does not cover mortgage interest rates, and offer to continue with the current topic." }
+]

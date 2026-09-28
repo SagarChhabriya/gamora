@@ -3,11 +3,31 @@
 :root {
   --background: #f7f0e6;
   --foreground: #173b36;
+  --panel: #efe5d7;
+  --accent: #c2502f;
+  --good: #3f8a5a;
+  --danger: #b44b38;
+  --danger-soft: #f4d9cf;
+}
+
+:root[data-contrast="high"] {
+  --background: #ffffff;
+  --foreground: #000000;
+  --panel: #f2f2f2;
+  --accent: #a3300f;
+  --good: #1d6b35;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-paper: var(--background);
+  --color-ink: var(--foreground);
+  --color-panel: var(--panel);
+  --color-accent: var(--accent);
+  --color-good: var(--good);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -15,10 +35,34 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
 
 ::selection {
   background: #ef6f4b;
   color: #f7f0e6;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-rise {
+  animation: rise 320ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
 }

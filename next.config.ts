@@ -2,6 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   devIndicators: false,
+  // pdfjs loads its worker file at runtime, which breaks when bundled.
+  serverExternalPackages: ["pdf-parse"],
   async headers() {
     return [
       {

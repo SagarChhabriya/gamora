@@ -17,7 +17,7 @@ export class GeminiProvider implements LLMProvider {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
     const started = Date.now();
-    const timeout = withTimeout(request.signal);
+    const timeout = withTimeout(request.signal, request.timeoutMs);
     try {
       const response = await fetch(`${baseUrl}/${request.model}:generateContent?key=${apiKey}`, {
         method: "POST",

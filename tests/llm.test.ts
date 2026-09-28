@@ -33,18 +33,13 @@ describe("LLM helpers", () => {
     process.env.LLM_GEMINI_FAST_MODEL = "gemini-3.1-flash-lite";
     process.env.GROQ_API_KEY = "test-groq";
     process.env.GEMINI_API_KEY = "test-gemini";
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response("overloaded", { status: 503 }))
-      .mockResolvedValueOnce(new Response("overloaded", { status: 503 }))
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            candidates: [{ content: { parts: [{ text: "fallback" }] } }],
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input).includes("groq")
+        ? new Response("overloaded", { status: 503 })
+        : new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "fallback" }] } }] }), {
+            status: 200,
           }),
-          { status: 200 },
-        ),
-      );
+    );
 
     const result = await generateWithFallback({
       model: "ignored-by-task-routing",
@@ -53,6 +48,42 @@ describe("LLM helpers", () => {
     });
 
     expect(result.provider).toBe("gemini");
-    expect(fetchMock.mock.calls[2]?.[0]).toContain("gemini-3.1-flash-lite");
+    expect(result.fallbackUsed).toBe(true);
+    const geminiCall = fetchMock.mock.calls.find(([input]) => String(input).includes("generativelanguage"));
+    expect(String(geminiCall?.[0])).toContain("gemini-3.1-flash-lite");
+  });
+
+  it("tries the provider's other model before giving up on it", async () => {
+    process.env.LLM_PRIMARY_PROVIDER = "gemini";
+    process.env.LLM_GEMINI_FAST_MODEL = "lite-a";
+    process.env.LLM_GEMINI_REASONING_MODEL = "lite-b";
+    process.env.GEMINI_API_KEY = "test-gemini";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input).includes("lite-a")
+        ? new Response("busy", { status: 503 })
+        : new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "ok" }] } }] }), { status: 200 }),
+    );
+
+    const result = await generateWithFallback({ model: "", task: "fast", messages: [{ role: "user", content: "hi" }] });
+    expect(result.model).toBe("lite-b");
+    delete process.env.LLM_GEMINI_REASONING_MODEL;
+  });
+
+  it("skips providers named in an outage drill", async () => {
+    process.env.LLM_PRIMARY_PROVIDER = "groq";
+    process.env.LLM_FALLBACK_PROVIDER = "gemini";
+    process.env.GROQ_API_KEY = "test-groq";
+    process.env.GEMINI_API_KEY = "test-gemini";
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "ok" }] } }] }), { status: 200 }));
+
+    const result = await generateWithFallback({
+      model: "m",
+      messages: [{ role: "user", content: "hi" }],
+      skipProviders: ["groq"],
+    });
+    expect(result.provider).toBe("gemini");
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("groq"))).toBe(false);
   });
 });

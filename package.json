@@ -12,7 +12,9 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "check:m2": "node scripts/m2-check.mjs",
+    "eval:roman-urdu": "node scripts/roman-urdu-bakeoff.mjs"
   },
   "dependencies": {
     "@upstash/ratelimit": "^2.0.7",

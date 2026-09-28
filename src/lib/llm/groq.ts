@@ -15,7 +15,7 @@ export class GroqProvider implements LLMProvider {
     const apiKey = process.env.GROQ_API_KEY;
     if (!apiKey) throw new Error("GROQ_API_KEY is not configured");
     const started = Date.now();
-    const timeout = withTimeout(request.signal);
+    const timeout = withTimeout(request.signal, request.timeoutMs);
     try {
       const response = await fetch(endpoint, {
         method: "POST",
@@ -28,6 +28,8 @@ export class GroqProvider implements LLMProvider {
           messages: request.messages,
           temperature: request.temperature ?? 0.2,
           max_tokens: request.maxTokens ?? 1_024,
+          // gpt-oss models reason before answering. Low effort keeps turn latency down.
+          ...(request.model.startsWith("openai/gpt-oss") ? { reasoning_effort: "low" } : {}),
           ...(request.jsonMode ? { response_format: { type: "json_object" } } : {}),
         }),
         signal: timeout.signal,

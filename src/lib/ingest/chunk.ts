@@ -4,7 +4,7 @@ export type SourceChunk = {
   tokens: number;
 };
 
-export function chunkText(text: string, targetTokens = 550, overlapTokens = 60): SourceChunk[] {
+export function chunkText(text: string, targetTokens = 320, overlapTokens = 40): SourceChunk[] {
   const words = text.split(/\s+/).filter(Boolean);
   const chunks: SourceChunk[] = [];
   const step = Math.max(1, targetTokens - overlapTokens);
