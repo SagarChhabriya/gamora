@@ -44,9 +44,25 @@ export type ConceptEdge = ConceptPlan["edges"][number];
 
 type CallContext = { requestId?: string; userHash?: string; skipProviders?: string[] };
 
+/** A concept name must read like words, not markup, code, or numbers. */
+export function isReadableName(name: string) {
+  const trimmed = name.trim();
+  if (trimmed.length < 3 || /[<>{}=]|href|https?:|www\.|\.(js|css|png|svg)\b/i.test(trimmed)) return false;
+  const letters = (trimmed.match(/\p{L}/gu) ?? []).length;
+  return letters >= 3 && letters / trimmed.replace(/\s/g, "").length >= 0.6;
+}
+
 export function deterministicConcepts(chunks: SourceChunk[]): ConceptPlan {
-  const concepts = chunks.slice(0, 12).map((chunk) => ({
-    name: chunk.text.split(/[.!?\n]/)[0].slice(0, 100) || `Concept ${chunk.index + 1}`,
+  const named = chunks.map((chunk) => ({
+    chunk,
+    name: chunk.text
+      .split(/[.!?\n]/)
+      .map((part) => part.trim())
+      .find((part) => isReadableName(part) && part.split(/\s+/).length >= 2)
+      ?.slice(0, 100),
+  }));
+  const concepts = named.filter((item) => item.name).slice(0, 12).map(({ chunk, name }) => ({
+    name: name as string,
     summary: chunk.text.slice(0, 300),
     difficulty: 3,
     source_chunk_indexes: [chunk.index],
@@ -62,7 +78,7 @@ export function sanitizePlan(plan: ConceptPlan, chunks: SourceChunk[]): ConceptP
       ...concept,
       source_chunk_indexes: concept.source_chunk_indexes.filter((index) => valid.has(index)),
     }))
-    .filter((concept) => concept.source_chunk_indexes.length > 0);
+    .filter((concept) => concept.source_chunk_indexes.length > 0 && isReadableName(concept.name));
   const edges = plan.edges.filter(
     (edge) => edge.from < concepts.length && edge.to < concepts.length && edge.from !== edge.to,
   );

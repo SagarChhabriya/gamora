@@ -68,11 +68,8 @@ export function ConceptGraph({ concepts, edges }: { concepts: Concept[]; edges: 
           return (
             <g key={concept.id} transform={`translate(${p.x},${p.y})`}>
               <rect width="160" height="44" rx="2" className="fill-panel stroke-ink/25" />
-              <text x="8" y="18" className="fill-ink text-[11px] font-semibold">
+              <text x="8" y="26" className="fill-ink text-[11px] font-semibold">
                 {concept.name.length > 24 ? `${concept.name.slice(0, 23)}...` : concept.name}
-              </text>
-              <text x="8" y="34" className="fill-ink/55 text-[10px]">
-                Level {concept.difficulty}
               </text>
               <title>{concept.name}</title>
             </g>

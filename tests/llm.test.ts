@@ -95,3 +95,51 @@ describe("rate limit handling", () => {
     expect(retryAfterMs(new Response("", { status: 429, headers: { "retry-after": "3" } }), "")).toBe(3000);
   });
 });
+
+describe("contributor key pool", () => {
+  it("switches to the next contributor key on a rate limit without waiting", async () => {
+    const { resetKeyPool } = await import("@/lib/llm/keys");
+    resetKeyPool();
+    process.env.LLM_PRIMARY_PROVIDER = "groq";
+    process.env.GROQ_API_KEY = "owner-key";
+    process.env.GROQ_API_KEY_SUM = "sum-key";
+    const seen: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      const auth = String((init?.headers as Record<string, string>)?.Authorization ?? "");
+      seen.push(auth);
+      return auth.includes("owner-key")
+        ? new Response("Rate limit reached. Please try again in 30s.", { status: 429 })
+        : new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), { status: 200 });
+    });
+    const result = await generateWithFallback({ model: "m", messages: [{ role: "user", content: "hi" }] });
+    expect(result.keyLabel).toBe("sum");
+    expect(seen.some((auth) => auth.includes("sum-key"))).toBe(true);
+    delete process.env.GROQ_API_KEY_SUM;
+  });
+
+  it("lists keys by contributor label and never exposes values in labels", async () => {
+    const { providerKeys } = await import("@/lib/llm/keys");
+    process.env.GEMINI_API_KEY = "a";
+    process.env.GEMINI_API_KEY_EDU = "b";
+    process.env.GEMINI_API_KEY_33 = "c";
+    expect(providerKeys("gemini").map((key) => key.label)).toEqual(["owner", "33", "edu"]);
+    delete process.env.GEMINI_API_KEY_EDU;
+    delete process.env.GEMINI_API_KEY_33;
+  });
+
+  it("uses OpenRouter from the provider chain", async () => {
+    process.env.LLM_PROVIDER_CHAIN = "groq,openrouter";
+    process.env.OPENROUTER_API_KEY = "or-key";
+    process.env.LLM_OPENROUTER_FAST_MODEL = "google/gemma-4-31b-it:free";
+    delete process.env.GROQ_API_KEY;
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), { status: 200 }));
+    const result = await generateWithFallback({ model: "", task: "fast", messages: [{ role: "user", content: "hi" }] });
+    expect(result.provider).toBe("openrouter");
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("openrouter.ai");
+    delete process.env.LLM_PROVIDER_CHAIN;
+    delete process.env.OPENROUTER_API_KEY;
+    delete process.env.LLM_OPENROUTER_FAST_MODEL;
+  });
+});

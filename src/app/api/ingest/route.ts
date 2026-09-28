@@ -78,8 +78,8 @@ export async function POST(request: Request) {
       payload: { content_id: created.contentId, source_type: sourceType, language: created.language, chars: text.length },
     });
     return NextResponse.json(
-      { content_id: created.contentId, language: created.language, job: created.job },
-      { status: 201 },
+      { content_id: created.contentId, language: created.language, job: created.job, duplicate: created.duplicate },
+      { status: created.duplicate ? 200 : 201 },
     );
   } catch (error) {
     if (!(error instanceof z.ZodError)) reportError(error, { requestId, userHash: auth.user.userHash, area: "ingest.create" });

@@ -48,7 +48,7 @@ export const appConfigSchema = z.object({
     allow_urdu_script: z.boolean().default(false),
   }),
   tone: z.object({
-    persona_name: z.string().min(1).max(40).default("Noor"),
+    persona_name: z.string().min(1).max(40).default("Sagar"),
     formality: z.enum(["casual", "friendly", "formal"]).default("friendly"),
     humor: z.enum(["none", "light"]).default("light"),
     max_words: z.number().int().min(30).max(250).default(90),

@@ -1,0 +1,23 @@
+// Copies LLM keys from .env.local to Vercel production without printing their values.
+// Picks up GROQ_API_KEY*, GEMINI_API_KEY*, OPENROUTER_API_KEY* (including contributor keys such as
+// GROQ_API_KEY_SUM) plus the LLM_OPENROUTER_* model settings. Existing Vercel values are replaced.
+// Usage: node scripts/sync-llm-keys.mjs
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+
+const wanted = /^(GROQ|GEMINI|OPENROUTER)_API_KEY(_[A-Z0-9]+)?$|^LLM_OPENROUTER_(FAST|REASONING)_MODEL$|^LLM_PROVIDER_CHAIN$/;
+const entries = readFileSync(".env.local", "utf8")
+  .split(/\r?\n/)
+  .map((line) => line.match(/^([A-Z0-9_]+)=(.*)$/))
+  .filter((match) => match && wanted.test(match[1]) && match[2].trim())
+  .map((match) => [match[1], match[2].trim().replace(/^"|"$/g, "")]);
+
+const run = (args, input) => spawnSync("npx", ["--no-install", "vercel", ...args], { input, encoding: "utf8", shell: process.platform === "win32" });
+
+for (const [name, value] of entries) {
+  run(["env", "rm", name, "production", "--yes"]);
+  const secret = name.includes("API_KEY");
+  const added = run(["env", "add", name, "production", ...(secret ? ["--type", "secret"] : []), "--value", value, "--yes"]);
+  console.log(`${name}: ${added.status === 0 ? "synced" : `failed (${(added.stderr || added.stdout).split("\n").find((line) => /error/i.test(line)) ?? "see vercel output"})`}`);
+}
+console.log(entries.length ? "Redeploy (git push) to apply." : "No LLM keys found in .env.local.");

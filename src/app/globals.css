@@ -38,6 +38,13 @@ body {
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
 
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+summary,
+label:has(input[type="file"]) {
+  cursor: pointer;
+}
+
 ::selection {
   background: #ef6f4b;
   color: #f7f0e6;

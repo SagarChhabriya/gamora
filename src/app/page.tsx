@@ -19,16 +19,27 @@ function Home({ session }: { session: SessionPayload }) {
   const [building, setBuilding] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [needsProfile, setNeedsProfile] = useState(false);
+
   useEffect(() => {
     void (async () => {
-      const profile = await authFetch("/api/profile");
-      if (profile.ok && !((await profile.json()) as { onboarded: boolean }).onboarded) {
-        router.replace("/onboarding");
-        return;
+      try {
+        const [profile, j, c] = await Promise.all([authFetch("/api/profile"), authFetch("/api/journeys"), authFetch("/api/contents")]);
+        const list = j.ok ? ((await j.json()) as { journeys: Journey[] }).journeys : [];
+        const onboarded = profile.ok ? ((await profile.json()) as { onboarded: boolean }).onboarded : true;
+        // Only a brand new learner goes straight to onboarding. Everyone else keeps their journeys in view.
+        if (!onboarded && list.length === 0) {
+          router.replace("/onboarding");
+          return;
+        }
+        setNeedsProfile(!onboarded);
+        setJourneys(list);
+        if (c.ok) setLibrary(((await c.json()) as { contents: Content[] }).contents.filter((item) => item.status === "ready" && !item.journey_id));
+        if (!j.ok) setError("Could not load your journeys. Please refresh.");
+      } catch {
+        setJourneys([]);
+        setError("Could not reach Gamora. Check your connection and refresh.");
       }
-      const [j, c] = await Promise.all([authFetch("/api/journeys"), authFetch("/api/contents")]);
-      if (j.ok) setJourneys(((await j.json()) as { journeys: Journey[] }).journeys);
-      if (c.ok) setLibrary(((await c.json()) as { contents: Content[] }).contents.filter((item) => item.status === "ready" && !item.journey_id));
     })();
   }, [router]);
 
@@ -68,6 +79,14 @@ function Home({ session }: { session: SessionPayload }) {
       </header>
 
       {error ? <Alert>{error}</Alert> : null}
+      {needsProfile ? (
+        <Alert tone="info">
+          Tell us a little about you so journeys fit your role and time.{" "}
+          <Link href="/onboarding" className="font-semibold text-accent underline underline-offset-4">
+            Finish your profile
+          </Link>
+        </Alert>
+      ) : null}
 
       <section aria-label="Your journeys" className="space-y-4">
         <h2 className="text-xl font-semibold">Your journeys</h2>

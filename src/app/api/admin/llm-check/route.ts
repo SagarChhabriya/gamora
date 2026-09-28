@@ -9,7 +9,11 @@ import { enforceRateLimit } from "@/lib/security/rate-limit";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-const bodySchema = z.object({ simulate_primary_outage: z.boolean().default(false) });
+const bodySchema = z.object({
+  simulate_primary_outage: z.boolean().default(false),
+  /** Test one provider on its own, for example "openrouter". */
+  only_provider: z.enum(["groq", "gemini", "openrouter"]).optional(),
+});
 
 /** Outage drill: proves the fallback provider answers when the primary is unavailable. */
 export async function POST(request: Request) {
@@ -22,7 +26,12 @@ export async function POST(request: Request) {
   if (!body.success) return NextResponse.json({ error: "Invalid request" }, { status: 400 });
 
   const primary = process.env.LLM_PRIMARY_PROVIDER;
-  const skip = body.data.simulate_primary_outage && primary ? [primary] : [];
+  const chain = providerChain().map((provider) => provider.name);
+  const skip = body.data.only_provider
+    ? chain.filter((name) => name !== body.data.only_provider)
+    : body.data.simulate_primary_outage
+      ? [chain[0] ?? primary ?? ""]
+      : [];
   try {
     const result = await generateWithFallback({
       task: "fast",
@@ -38,6 +47,7 @@ export async function POST(request: Request) {
       chain: providerChain().map((provider) => provider.name),
       simulated_outage: skip,
       served_by: result.provider,
+      key: result.keyLabel,
       model: result.model,
       latency_ms: result.latencyMs,
       fallback_used: result.fallbackUsed || skip.length > 0,

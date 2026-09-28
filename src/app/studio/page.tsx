@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 
 import { AppShell } from "@/components/app-shell";
 import { ConceptGraph } from "@/components/concept-graph";
+import { useToast } from "@/components/toast";
 import { Alert, Button, Card, Eyebrow, Field, Input, Textarea, cx } from "@/components/ui";
 import { authFetch } from "@/lib/auth/client";
 
@@ -18,7 +19,7 @@ type Debug = {
   concepts: Array<{ id: string; name: string; summary: string; difficulty: number; source_chunk_ids: string[] }>;
   edges: Array<{ from_id: string; to_id: string; type: string }>;
 };
-type ContentRow = { id: string; title: string; status: string; language: string | null; chunk_count: number; created_at: string; journey_id: string | null };
+type ContentRow = { id: string; title: string; status: string; language: string | null; chunk_count: number; created_at: string; journey_id: string | null; mine: boolean; shared: boolean };
 
 const modes: Array<{ id: Mode; label: string; hint: string }> = [
   { id: "text", label: "Paste text", hint: "Drop in a policy, procedure, or note." },
@@ -54,6 +55,9 @@ function Studio() {
   const [debug, setDebug] = useState<Debug | null>(null);
   const [contents, setContents] = useState<ContentRow[]>([]);
   const [building, setBuilding] = useState(false);
+  const [inspecting, setInspecting] = useState<string | null>(null);
+  const debugRef = useRef<HTMLElement>(null);
+  const toast = useToast();
 
   const loadContents = useCallback(async () => {
     const response = await authFetch("/api/contents");
@@ -67,8 +71,28 @@ function Studio() {
   }, [loadContents]);
 
   async function loadDebug(contentId: string) {
-    const response = await authFetch(`/api/ingest/${contentId}`);
-    if (response.ok) setDebug((await response.json()) as Debug);
+    setInspecting(contentId);
+    try {
+      const response = await authFetch(`/api/ingest/${contentId}`);
+      if (!response.ok) throw new Error("Could not load this source");
+      setDebug((await response.json()) as Debug);
+      // Bring the map into view so the result of Inspect is visible.
+      requestAnimationFrame(() => debugRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    } catch (caught) {
+      toast.show(caught instanceof Error ? caught.message : "Could not load this source", "error");
+    } finally {
+      setInspecting(null);
+    }
+  }
+
+  async function removeSource(content: ContentRow) {
+    if (!window.confirm(`Remove "${content.title}" and any journeys built from it?`)) return;
+    const response = await authFetch(`/api/contents/${content.id}`, { method: "DELETE" });
+    if (response.ok) {
+      if (debug?.content.id === content.id) setDebug(null);
+      toast.show(`Removed "${content.title}".`, "info");
+      await loadContents();
+    } else toast.show("Could not remove this source.", "error");
   }
 
   async function runSteps(contentId: string, started: number) {
@@ -107,7 +131,7 @@ function Studio() {
         };
       }
       const response = await authFetch("/api/ingest", init);
-      const payload = (await response.json()) as { content_id?: string; job?: Job; error?: string; injection_flags?: string[] };
+      const payload = (await response.json()) as { content_id?: string; job?: Job; error?: string; injection_flags?: string[]; duplicate?: boolean };
       if (!response.ok || !payload.content_id || !payload.job) {
         throw new Error(
           payload.injection_flags?.length
@@ -117,9 +141,11 @@ function Studio() {
       }
       setUploading(false);
       setJob(payload.job);
+      if (payload.duplicate) toast.show("You already added this material, so the existing map is reused.", "info");
       await runSteps(payload.content_id, started);
       await loadDebug(payload.content_id);
       await loadContents();
+      if (!payload.duplicate) toast.show(`Content map ready in ${((Date.now() - started) / 1000).toFixed(1)} s. You can build your journey now.`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Upload failed");
     } finally {
@@ -241,7 +267,7 @@ function Studio() {
       </div>
 
       {debug && (
-        <section aria-live="polite" className="animate-rise space-y-6 border-t border-ink/15 pt-8">
+        <section ref={debugRef} aria-live="polite" className="animate-rise scroll-mt-6 space-y-6 border-t border-ink/15 pt-8">
           <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
             <div>
               <Eyebrow>Source map ready</Eyebrow>
@@ -288,6 +314,7 @@ function Studio() {
         </section>
       )}
 
+      {toast.view}
       <section className="space-y-4 border-t border-ink/15 pt-8">
         <h2 className="text-xl font-semibold">Your sources</h2>
         {contents.length === 0 ? (
@@ -303,9 +330,14 @@ function Studio() {
                   </p>
                 </div>
                 <div className="flex gap-2">
-                  <Button variant="ghost" onClick={() => loadDebug(content.id)}>
-                    Inspect
+                  <Button variant="ghost" onClick={() => loadDebug(content.id)} disabled={inspecting !== null} aria-busy={inspecting === content.id}>
+                    {inspecting === content.id ? "Opening..." : debug?.content.id === content.id ? "Inspecting" : "Inspect"}
                   </Button>
+                  {content.mine ? (
+                    <Button variant="ghost" onClick={() => void removeSource(content)} aria-label={`Remove ${content.title}`}>
+                      Remove
+                    </Button>
+                  ) : null}
                   {content.journey_id ? (
                     <Link href={`/journey/${content.journey_id}`} className="inline-flex min-h-11 items-center px-4 text-sm font-semibold text-accent">
                       Open journey

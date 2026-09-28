@@ -18,7 +18,7 @@ type Step = {
 const steps: Step[] = [
   {
     key: "role",
-    ask: (name) => `Hi ${name}, I am Noor, your learning guide. What do you do day to day?`,
+    ask: (name) => `Hi ${name}, I am Sagar, your learning guide. What do you do day to day?`,
     chips: [
       { label: "Branch teller", value: "Branch teller" },
       { label: "Relationship manager", value: "Relationship manager" },
@@ -86,7 +86,10 @@ function Onboarding({ session }: { session: SessionPayload }) {
   const [saving, setSaving] = useState(false);
   const end = useRef<HTMLDivElement>(null);
 
-  useEffect(() => end.current?.scrollIntoView({ behavior: "smooth" }), [messages]);
+  useEffect(() => {
+    // Braces matter: newer browsers return a Promise from scrollIntoView, which must not become the cleanup.
+    end.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   async function answer(value: string, label: string) {
     const step = steps[index];

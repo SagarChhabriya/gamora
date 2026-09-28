@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { chunkText, type SourceChunk } from "@/lib/ingest/chunk";
 import { extractConcepts, linkConcepts } from "@/lib/ingest/concepts";
 import { detectLanguage } from "@/lib/ingest/language";
@@ -34,6 +36,17 @@ export async function createIngestJob(input: {
   text: string;
 }) {
   const language = detectLanguage(input.text);
+  const contentHash = createHash("sha256").update(input.text.replace(/\s+/g, " ").trim()).digest("hex");
+
+  // Same owner, same text: reuse the existing source rather than creating a duplicate.
+  const existing = await supabaseRequest<Array<{ id: string; language: string | null }>>(
+    `contents?owner_id=eq.${input.ownerId}&content_hash=eq.${contentHash}&status=in.(ready,processing)&select=id,language&order=created_at.desc&limit=1`,
+  );
+  if (existing?.[0]) {
+    const job = await getJobForContent(existing[0].id);
+    if (job) return { contentId: existing[0].id, language: existing[0].language ?? language, job: publicJob(job), duplicate: true };
+  }
+
   const contents = await supabaseRequest<Array<{ id: string }>>("contents", {
     method: "POST",
     headers: { Prefer: "return=representation" },
@@ -43,6 +56,7 @@ export async function createIngestJob(input: {
       source_type: input.sourceType,
       status: "processing",
       language,
+      content_hash: contentHash,
     }),
   });
   const contentId = contents?.[0]?.id;
@@ -62,7 +76,7 @@ export async function createIngestJob(input: {
   });
   const job = jobs?.[0];
   if (!job) throw new Error("Supabase did not return an ingest job");
-  return { contentId, language, job: publicJob(job) };
+  return { contentId, language, job: publicJob(job), duplicate: false };
 }
 
 export function publicJob(job: IngestJob) {

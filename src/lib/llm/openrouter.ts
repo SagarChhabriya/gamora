@@ -1,19 +1,21 @@
 import { readJsonResponse, withTimeout } from "@/lib/llm/http";
 import type { GenerateRequest, GenerateResponse, LLMProvider, StreamChunk } from "@/lib/llm/types";
 
-const endpoint = "https://api.groq.com/openai/v1/chat/completions";
+const endpoint = "https://openrouter.ai/api/v1/chat/completions";
 
-type GroqResponse = {
-  choices?: Array<{ message?: { content?: string } }>;
+type OpenRouterResponse = {
+  choices?: Array<{ message?: { content?: string | null } }>;
   usage?: { prompt_tokens?: number; completion_tokens?: number };
+  error?: { message?: string; code?: number };
 };
 
-export class GroqProvider implements LLMProvider {
-  readonly name = "groq";
+/** OpenRouter: OpenAI-compatible gateway, used for its free models as a third provider. */
+export class OpenRouterProvider implements LLMProvider {
+  readonly name = "openrouter";
 
   async generate(request: GenerateRequest): Promise<GenerateResponse> {
-    const apiKey = request.apiKey ?? process.env.GROQ_API_KEY;
-    if (!apiKey) throw new Error("GROQ_API_KEY is not configured");
+    const apiKey = request.apiKey ?? process.env.OPENROUTER_API_KEY;
+    if (!apiKey) throw new Error("OPENROUTER_API_KEY is not configured");
     const started = Date.now();
     const timeout = withTimeout(request.signal, request.timeoutMs);
     try {
@@ -22,21 +24,23 @@ export class GroqProvider implements LLMProvider {
         headers: {
           Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
+          "HTTP-Referer": process.env.APP_ORIGIN ?? "https://gamora-web.vercel.app",
+          "X-Title": "Gamora",
         },
         body: JSON.stringify({
           model: request.model,
           messages: request.messages,
           temperature: request.temperature ?? 0.2,
           max_tokens: request.maxTokens ?? 1_024,
-          // gpt-oss models reason before answering. Low effort keeps turn latency down.
-          ...(request.model.startsWith("openai/gpt-oss") ? { reasoning_effort: "low" } : {}),
+          // Keep hidden reasoning short and out of the answer.
+          reasoning: { effort: "low", exclude: true },
           ...(request.jsonMode ? { response_format: { type: "json_object" } } : {}),
         }),
         signal: timeout.signal,
       });
-      const data = await readJsonResponse<GroqResponse>(response, this.name);
+      const data = await readJsonResponse<OpenRouterResponse>(response, this.name);
       const text = data.choices?.[0]?.message?.content;
-      if (!text) throw new Error("Groq returned an empty response");
+      if (!text) throw new Error(`OpenRouter returned an empty response${data.error?.message ? `: ${data.error.message}` : ""}`);
       return {
         text,
         provider: this.name,

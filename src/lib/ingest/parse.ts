@@ -53,7 +53,34 @@ export async function parseRemoteSource(value: string) {
   if (!contentType.includes("text/") && !contentType.includes("json")) {
     throw new Error("Remote source must be text or HTML");
   }
-  return parseTextSource(await response.text());
+  const body = await response.text();
+  return parseTextSource(contentType.includes("html") || /^\s*<(!doctype|html)/i.test(body) ? htmlToText(body) : body);
+}
+
+const entities: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", mdash: ", ", ndash: "-", hellip: "..." };
+
+/**
+ * Readable text from an HTML page: prefers <main> or <article>, drops scripts, styles, navigation
+ * and markup, keeps paragraph breaks. Without this, tags and attributes become "concepts".
+ */
+export function htmlToText(html: string) {
+  let source = html.replace(/<!--[\s\S]*?-->/g, " ");
+  const main = source.match(/<(main|article)\b[^>]*>([\s\S]*?)<\/\1>/i)?.[2];
+  if (main && main.replace(/<[^>]+>/g, "").trim().length > 400) source = main;
+  return source
+    .replace(/<(script|style|noscript|svg|head|nav|footer|header|form|template|iframe)\b[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<(br|\/p|\/div|\/li|\/h[1-6]|\/tr|\/section|\/article)\b[^>]*>/gi, "\n")
+    .replace(/<li\b[^>]*>/gi, "\n- ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, code: string) => {
+      if (code.startsWith("#x")) return String.fromCodePoint(parseInt(code.slice(2), 16));
+      if (code.startsWith("#")) return String.fromCodePoint(Number(code.slice(1)));
+      return entities[code.toLowerCase()] ?? match;
+    })
+    .replace(/[ \t]+/g, " ")
+    .replace(/\s*\n\s*/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 /**

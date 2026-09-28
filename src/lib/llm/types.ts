@@ -21,6 +21,8 @@ export type GenerateRequest = {
   cacheTtlSeconds?: number;
   /** Provider names to treat as unavailable. Used by the outage drill. */
   skipProviders?: string[];
+  /** Set by the router from the key pool. Providers fall back to their default env key. */
+  apiKey?: string;
 };
 
 export type GenerateResponse = {
@@ -32,6 +34,7 @@ export type GenerateResponse = {
   latencyMs: number;
   cached?: boolean;
   fallbackUsed?: boolean;
+  keyLabel?: string;
 };
 
 export type StreamChunk = {
