@@ -117,12 +117,29 @@ describe("contributor key pool", () => {
     delete process.env.GROQ_API_KEY_SUM;
   });
 
+  it("keeps the fallback sequence: the owner key serves every request until it is rate limited", async () => {
+    const { resetKeyPool, restKey, keyOrder } = await import("@/lib/llm/keys");
+    resetKeyPool();
+    process.env.GROQ_API_KEY = "owner-key";
+    process.env.GROQ_API_KEY_SUM = "sum-key";
+    process.env.GROQ_API_KEY_EDU = "edu-key";
+    expect(keyOrder("groq").map((key) => key.label)).toEqual(["owner", "sum", "edu"]);
+    expect(keyOrder("groq").map((key) => key.label)).toEqual(["owner", "sum", "edu"]);
+    restKey("groq", "owner", 30_000);
+    expect(keyOrder("groq").map((key) => key.label)).toEqual(["sum", "edu", "owner"]);
+    restKey("groq", "sum", 30_000);
+    expect(keyOrder("groq")[0].label).toBe("edu");
+    resetKeyPool();
+    delete process.env.GROQ_API_KEY_SUM;
+    delete process.env.GROQ_API_KEY_EDU;
+  });
+
   it("lists keys by contributor label and never exposes values in labels", async () => {
     const { providerKeys } = await import("@/lib/llm/keys");
     process.env.GEMINI_API_KEY = "a";
     process.env.GEMINI_API_KEY_EDU = "b";
     process.env.GEMINI_API_KEY_33 = "c";
-    expect(providerKeys("gemini").map((key) => key.label)).toEqual(["owner", "33", "edu"]);
+    expect(providerKeys("gemini").map((key) => key.label)).toEqual(["owner", "edu", "33"]);
     delete process.env.GEMINI_API_KEY_EDU;
     delete process.env.GEMINI_API_KEY_33;
   });

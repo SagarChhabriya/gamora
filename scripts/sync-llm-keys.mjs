@@ -5,7 +5,7 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
-const wanted = /^(GROQ|GEMINI|OPENROUTER)_API_KEY(_[A-Z0-9]+)?$|^LLM_OPENROUTER_(FAST|REASONING)_MODEL$|^LLM_PROVIDER_CHAIN$/;
+const wanted = /^(GROQ|GEMINI|OPENROUTER)_API_KEY(_[A-Z0-9]+)?$|^LLM_OPENROUTER_(FAST|REASONING)_MODEL$|^LLM_PROVIDER_CHAIN$|^LLM_KEY_ORDER$/;
 const entries = readFileSync(".env.local", "utf8")
   .split(/\r?\n/)
   .map((line) => line.match(/^([A-Z0-9_]+)=(.*)$/))
@@ -20,4 +20,8 @@ for (const [name, value] of entries) {
   const added = run(["env", "add", name, "production", ...(secret ? ["--type", "secret"] : []), "--value", value, "--yes"]);
   console.log(`${name}: ${added.status === 0 ? "synced" : `failed (${(added.stderr || added.stdout).split("\n").find((line) => /error/i.test(line)) ?? "see vercel output"})`}`);
 }
-console.log(entries.length ? "Redeploy (git push) to apply." : "No LLM keys found in .env.local.");
+console.log(
+  entries.length
+    ? "Vercel only reads environment changes on a new deployment. Run: npx vercel --prod (or push a commit, or Redeploy in the Vercel dashboard)."
+    : "No LLM keys found in .env.local.",
+);
