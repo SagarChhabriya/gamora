@@ -160,3 +160,47 @@ describe("contributor key pool", () => {
     delete process.env.LLM_OPENROUTER_FAST_MODEL;
   });
 });
+
+describe("fallback speed", () => {
+  it("moves to the next key when one key's limit is too small, instead of leaving the provider", async () => {
+    const { resetKeyPool } = await import("@/lib/llm/keys");
+    resetKeyPool();
+    process.env.LLM_PRIMARY_PROVIDER = "groq";
+    process.env.LLM_FALLBACK_PROVIDER = "gemini";
+    process.env.GROQ_API_KEY = "owner-key";
+    process.env.GROQ_API_KEY_SUM = "small-key";
+    process.env.GEMINI_API_KEY = "test-gemini";
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const auth = String((init?.headers as Record<string, string>)?.Authorization ?? "");
+      if (!String(input).includes("groq")) return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "gemini" }] } }] }), { status: 200 });
+      if (auth.includes("owner-key")) return new Response("Request too large for model on tokens per minute", { status: 413 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: "groq" } }], usage: {} }), { status: 200 });
+    });
+    const result = await generateWithFallback({ model: "", task: "fast", messages: [{ role: "user", content: "hi" }] });
+    expect(result.provider).toBe("groq");
+    expect(result.keyLabel).toBe("sum");
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("generativelanguage"))).toBe(false);
+    delete process.env.GROQ_API_KEY_SUM;
+  });
+
+  it("does not ask a model that timed out a second time", async () => {
+    const { resetKeyPool } = await import("@/lib/llm/keys");
+    resetKeyPool();
+    process.env.LLM_PRIMARY_PROVIDER = "groq";
+    process.env.LLM_FALLBACK_PROVIDER = "gemini";
+    process.env.LLM_GROQ_FAST_MODEL = "slow-model";
+    process.env.GROQ_API_KEY = "test-groq";
+    process.env.GEMINI_API_KEY = "test-gemini";
+    let slowCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (String(input).includes("groq") && String(init?.body).includes("slow-model")) {
+        slowCalls += 1;
+        throw Object.assign(new Error("This operation was aborted"), { name: "AbortError" });
+      }
+      if (String(input).includes("groq")) return new Response(JSON.stringify({ choices: [{ message: { content: "other" } }], usage: {} }), { status: 200 });
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "gemini" }] } }] }), { status: 200 });
+    });
+    await generateWithFallback({ model: "", task: "fast", messages: [{ role: "user", content: "hi" }] });
+    expect(slowCalls).toBe(1);
+  });
+});

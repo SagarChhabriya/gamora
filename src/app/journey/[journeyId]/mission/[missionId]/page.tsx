@@ -350,7 +350,9 @@ function Mission() {
         {readAloudToggle}
         {handsFreeToggle}
         {!voice.ttsSupported ? <p className="text-xs text-ink/55">This browser cannot read aloud. Text works fully.</p> : null}
-        {readAloud && state?.language === "roman_ur" && voice.hasVoices ? <p className="text-xs text-ink/55">Roman Urdu is read by an English voice, captions stay on.</p> : null}
+        {(readAloud || handsFree.on) && voice.hasVoices && !voice.southAsianVoice ? (
+          <p className="text-xs text-ink/55">This device has no Pakistani or South Asian English voice, so a standard English voice reads aloud. In Microsoft Edge, the English (India) voices sound closest.</p>
+        ) : null}
       </fieldset>
     </>
   );

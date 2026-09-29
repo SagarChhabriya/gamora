@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { authFetch } from "@/lib/auth/client";
+import { isSouthAsian, pickVoice } from "@/lib/voice/pick-voice";
 
 type Language = "en" | "roman_ur";
 
@@ -163,18 +164,17 @@ export function useVoice(language: Language, onText?: (text: string) => void, on
     if (recorder.current?.state === "recording") recorder.current.stop();
   }, []);
 
-  /** Speaks text. Picks an ur-PK voice for Roman Urdu when available, else an English voice. */
+  /** Speaks text in the most Pakistani-sounding English voice the device has (see pick-voice). */
   const speak = useCallback(
     (text: string, options?: { onEnd?: () => void }) => {
       if (!ttsSupported || !text) return false;
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text.replace(/[*_#>`]/g, ""));
-      const preferred =
-        language === "roman_ur"
-          ? voices.find((voice) => voice.lang.startsWith("en-IN")) ?? voices.find((voice) => voice.lang.startsWith("en"))
-          : voices.find((voice) => voice.lang === "en-US") ?? voices.find((voice) => voice.lang.startsWith("en"));
+      // A Pakistani or other South Asian English voice first, for English and Roman Urdu alike.
+      const preferred = pickVoice(voices);
       if (preferred) utterance.voice = preferred;
-      utterance.lang = preferred?.lang ?? "en-US";
+      // Without a matching voice, ask the browser for Indian English rather than its US default.
+      utterance.lang = preferred?.lang ?? "en-IN";
       utterance.rate = 1;
       utterance.onstart = () => setSpeaking(true);
       utterance.onend = () => {
@@ -186,7 +186,7 @@ export function useVoice(language: Language, onText?: (text: string) => void, on
       window.speechSynthesis.speak(utterance);
       return true;
     },
-    [language, ttsSupported, voices],
+    [ttsSupported, voices],
   );
 
   const silence = useCallback(() => {
@@ -197,5 +197,7 @@ export function useVoice(language: Language, onText?: (text: string) => void, on
   // Hands-free needs recognition that ends on its own when the learner stops talking.
   const autoStopSupported = typeof window !== "undefined" && Boolean(recognitionCtor());
 
-  return { listening, transcript, setTranscript, note, setNote, start, stop, speak, silence, speaking, sttSupported, ttsSupported, autoStopSupported, hasVoices: voices.length > 0 };
+  const southAsianVoice = isSouthAsian(pickVoice(voices));
+
+  return { listening, transcript, setTranscript, note, setNote, start, stop, speak, silence, speaking, sttSupported, ttsSupported, autoStopSupported, hasVoices: voices.length > 0, southAsianVoice };
 }

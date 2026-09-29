@@ -162,7 +162,7 @@ sequenceDiagram
 | Cache and rate limits | Upstash Redis + @upstash/ratelimit | HTTP-based Redis that works from serverless functions | Vercel KV, Cloudflare KV, Redis Cloud, in-database counters |
 | Language models | Groq (gpt-oss-20b fast, gpt-oss-120b reasoning), Gemini flash-lite, OpenRouter free models | Fast free tiers; providers chained for resilience | OpenAI, Anthropic Claude, Mistral, Cohere, self-hosted Llama via Ollama or vLLM |
 | Speech to text | Browser Web Speech API, then Groq Whisper | Free and instant in Chrome and Edge; Whisper covers other browsers | Deepgram, AssemblyAI, Google Speech, Azure Speech |
-| Text to speech | Browser speechSynthesis | Free, offline-capable, no audio leaves the device | ElevenLabs, Azure TTS, Google TTS |
+| Text to speech | Browser speechSynthesis, preferring a Pakistani English voice, then other South Asian English (usually Indian English) | Free, offline-capable, no audio leaves the device | ElevenLabs, Azure TTS, Google TTS |
 | File parsing | pdf-parse (PDF), mammoth (DOCX), own HTML-to-text | Pure JavaScript, runs inside a serverless function | Apache Tika, unstructured.io, LlamaParse |
 | Errors | Sentry | Stack traces with request IDs, client and server | Datadog, New Relic, LogRocket |
 | Tests | Vitest (unit, route, eval), Playwright (end to end) | Fast TypeScript-native tests; real-browser checks | Jest, Cypress |
@@ -172,7 +172,7 @@ sequenceDiagram
 ### The AI layer in detail
 
 - **One interface, several providers.** Every model call goes through `generateWithFallback` in `src/lib/llm/router.ts`. Feature code asks for a task ("fast" or "reasoning"), never a model name.
-- **Provider chain.** Groq first (fastest), then Gemini, then OpenRouter, configured by environment variables. If a provider fails or refuses a request, the next one is tried. Within a provider, the other model is tried too.
+- **Provider chain.** Groq first (fastest), then Gemini (about 4 seconds), then OpenRouter (free models, often 10 to 25 seconds, so last), set by `LLM_PROVIDER_CHAIN`. If a provider fails or refuses a request, the next one is tried. Within a provider, the other model is tried too. A request too large for one contributor key moves to the next key; a model that timed out is not asked again.
 - **Key pools.** Several team members contribute their own free-tier keys (`GROQ_API_KEY`, `GROQ_API_KEY_SUM`, `GROQ_API_KEY_EDU`, ...). A key that hits its rate limit rests until its window resets and the next key takes over. Logs name the key's owner label, never the key.
 - **Why it sometimes feels slow.** Free tiers limit tokens per minute (Groq: about 8,000 per model per key) and occasionally overload (Gemini returns "503, model overloaded"). A request that needs a backup takes longer. Gamora now tells the learner when this happens (a short notice) and keeps prompts small enough to avoid "request too large" refusals.
 - **Caching.** Replies to identical prompts (concept extraction, linking, planning) are cached in Redis for a week, which makes re-uploads and repeated plans instant.
@@ -202,7 +202,7 @@ sequenceDiagram
 
 **Starting challenge** follows the intro-chat answer "How familiar are you with the material?": brand new starts at the admin default (2), "I know some of it" at 3, "I know it well" at 4. Learner types such as "Short on time" or "Slow connection" change pace and format, not difficulty.
 
-**Mastery** per topic is a number from 0 to 1 (`src/lib/learner-model/mastery.ts`):
+**Mastery** per topic is a number from 0 to 1 (`src/lib/learner-model/mastery.ts`). The full calculation with worked examples is in [MASTERY.md](MASTERY.md).
 
 - Each answer produces evidence signals: correct, partial, wrong, hint used, self-corrected, transfer (used the idea in a new situation), recall success or fail, teach-back, calibrated or overconfident.
 - Each signal moves mastery by `weight x strength x step` (step 0.35 by default). Gains shrink as mastery rises (by up to half); losses shrink as confidence in the estimate grows.
@@ -257,7 +257,7 @@ Admins edit a versioned configuration (`/admin/config`): starting level, persona
 
 ### Testing, CI and deployment
 
-- 144 unit and route tests (Vitest) covering ingestion safety, topic grouping, diagram rules, storyboard grounding, planner routes, policy rules, mastery, voice commands and more; separate evaluation tests for grounding and Roman Urdu.
+- 150 unit and route tests (Vitest) covering ingestion safety, topic grouping, diagram rules, storyboard grounding, planner routes, policy rules, mastery, voice commands and more; separate evaluation tests for grounding and Roman Urdu.
 - Playwright smoke and walkthrough tests in a real browser.
 - GitHub Actions runs lint, typecheck and tests on every push.
 - Deployment: pushing to `main` triggers a Vercel production build automatically. Database changes are SQL migrations in `supabase/migrations`, applied with `supabase db push`.

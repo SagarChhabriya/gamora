@@ -37,7 +37,7 @@ XP, levels, streaks, badges: correct answer ${xp.correct} XP, partial ${xp.parti
 
 Learner types: ${personas.map((id) => personaLabels[id]).join(", ")}. Set in your profile or switch inside a mission; the next activity adapts.
 
-Language and voice: English or Roman Urdu, switchable inside a mission. Technical terms stay in English. "Speak" answers by voice. "Listen" reads a message aloud; "Read replies aloud" reads new replies automatically. Hands-free mode (Chrome or Edge) reads each step, then listens: say next, hint, repeat, an option letter, or your answer, and say stop to end it. It pauses after two quiet turns. On phones, tap Listen or the read aloud switch once so the browser allows sound. Text only mode turns voice off for slow connections.
+Language and voice: English or Roman Urdu, switchable inside a mission. Technical terms stay in English. "Speak" answers by voice. "Listen" reads a message aloud; "Read replies aloud" reads new replies automatically. Hands-free mode (Chrome or Edge) reads each step, then listens: say next, hint, repeat, an option letter, or your answer, and say stop to end it. It pauses after two quiet turns. On phones, tap Listen or the read aloud switch once so the browser allows sound. Read-aloud uses a Pakistani or other South Asian English voice when the device has one (Microsoft Edge has natural English (India) voices). Text only mode turns voice off for slow connections.
 
 Accessibility: the High contrast button is in the top bar and is remembered on this device.
 

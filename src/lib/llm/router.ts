@@ -91,6 +91,12 @@ function modelsForProvider(
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** A request we gave up on because the model took longer than its time limit. */
+export function isTimeout(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  return error.name === "AbortError" || error.name === "TimeoutError" || /aborted|timed? ?out/i.test(error.message);
+}
+
 export function estimateCostUsd(
   provider: string,
   inputTokens = 0,
@@ -149,6 +155,7 @@ export async function generateWithFallback(
       const keys = keyOrder(provider.name);
       let shortestWait = Infinity;
       let waited = false;
+      let tooLargeKeys = 0;
       for (let index = 0; index < keys.length; index += 1) {
         const { key, label } = keys[index];
         // All remaining keys are resting: wait once if the window is short, else move on.
@@ -223,8 +230,14 @@ export async function generateWithFallback(
           const rateLimited =
             error instanceof LLMProviderError && /\(429\)/.test(error.message);
           if (error instanceof LLMProviderError && /\(413\)/.test(error.message)) {
-            tooLarge = true;
-            break;
+            // Keys can have different per-minute token limits, so a request too large for one
+            // contributor's key may fit another. Only when every key refuses is the provider skipped.
+            tooLargeKeys += 1;
+            if (tooLargeKeys >= keys.length) {
+              tooLarge = true;
+              break;
+            }
+            continue;
           }
           if (rateLimited) {
             // This contributor's quota is spent for now. Rest the key and try the next one immediately.
@@ -242,6 +255,8 @@ export async function generateWithFallback(
           const retryable =
             !(error instanceof LLMProviderError) || error.retryable;
           if (!retryable) break;
+          // A model that timed out is slow right now: asking it again only doubles the wait.
+          if (isTimeout(error)) break;
           if (index === keys.length - 1 && !waited) {
             // One short retry on a transient server error or timeout.
             waited = true;
