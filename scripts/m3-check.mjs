@@ -44,6 +44,7 @@ async function turn(body) {
 function answerFor(activity, attempt) {
   switch (activity.type) {
     case "scenario":
+    case "crossroads":
     case "spot_error":
       return { choice_id: (activity.options ?? activity.steps)[attempt % (activity.options ?? activity.steps).length].id };
     case "ordering":
@@ -110,6 +111,17 @@ try {
   let complete = null;
   while (activity && guard < 20) {
     guard += 1;
+    if (activity.type === "lesson") {
+      // Lessons teach before any question and are not scored: the learner just moves on.
+      result = await turn({ mission_id: mission.id, action: "continue" });
+      const next = result.events.find((event) => event.type === "activity")?.activity;
+      const error = result.events.find((event) => event.type === "error");
+      console.log(`  lesson "${activity.title}" (${activity.grounded}) ${result.ms} ms -> ${error ? `ERROR ${error.message}` : `next: ${next?.type ?? "end"}`}`);
+      if (error) break;
+      complete = result.events.find((event) => event.type === "mission_complete")?.summary ?? null;
+      activity = next;
+      continue;
+    }
     if (activity.type === "roleplay") {
       for (let index = 0; index < 3; index += 1) {
         result = await turn({ mission_id: mission.id, action: "answer", reply: "I would politely verify your identity with your original ID card first, then continue." });

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import type { AppConfig, Persona } from "@/lib/config/schema";
-import { repairJson } from "@/lib/llm/json";
+import { parseLenient, repairJson } from "@/lib/llm/json";
 import { generateWithFallback } from "@/lib/llm/router";
 import { languageRule, learnerText, tutorSystemPrompt } from "@/lib/tutor/prompts";
 import { refsToIds, sourceBlock } from "@/lib/tutor/retrieval";
@@ -80,7 +80,7 @@ ${sourceBlock(input.chunks)}
         },
       ],
     });
-    const parsed = verdictSchema.parse(repairJson<unknown>(response.text));
+    const parsed = parseLenient(verdictSchema, repairJson<unknown>(response.text));
     const unsupported = parsed.verdicts
       .filter((verdict) => verdict.verdict === "unsupported")
       .map((verdict) => ({ claim: input.claims[Number(verdict.claim_id) - 1] ?? "", reason: verdict.reason }));
@@ -135,7 +135,7 @@ ${languageRule(input.language)}`,
         },
       ],
     });
-    const parsed = answerSchema.parse(repairJson<unknown>(response.text));
+    const parsed = parseLenient(answerSchema, repairJson<unknown>(response.text));
     const ids = refsToIds(parsed.source_refs, input.chunks);
     if (!parsed.covered || (input.config.grounding.must_cite && !ids.length)) {
       return { text: parsed.covered ? abstain : parsed.answer || abstain, source_chunk_ids: [], abstained: true, verified: true };

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import type { AssistantLink } from "@/lib/assistant/context";
-import { repairJson } from "@/lib/llm/json";
+import { parseLenient, repairJson } from "@/lib/llm/json";
 import { generateWithFallback } from "@/lib/llm/router";
 import { languageRule } from "@/lib/tutor/prompts";
 import type { Language } from "@/lib/tutor/types";
@@ -88,7 +88,7 @@ export async function askAssistant(input: {
         { role: "user", content: `<user_message>${quote(input.message)}</user_message>` },
       ],
     });
-    const parsed = replySchema.parse(repairJson<unknown>(response.text));
+    const parsed = parseLenient(replySchema, repairJson<unknown>(response.text));
     return { reply: parsed.reply, links: pickLinks(parsed.links, input.links), ok: true };
   } catch {
     return {

@@ -204,3 +204,20 @@ describe("fallback speed", () => {
     expect(slowCalls).toBe(1);
   });
 });
+
+describe("lenient parsing of model replies", () => {
+  it("keeps a reply that only runs long, trimming it to the limits", async () => {
+    const { z } = await import("zod");
+    const { parseLenient } = await import("@/lib/llm/json");
+    const schema = z.object({ notes: z.array(z.string().max(10)).min(1).max(4), title: z.string().max(5) });
+    expect(parseLenient(schema, { notes: ["a", "b", "c", "d", "e", "twelve chars"], title: "too long title" })).toEqual({ notes: ["a", "b", "c", "d"], title: "too l" });
+  });
+
+  it("still rejects replies that are wrong, not just long", async () => {
+    const { z } = await import("zod");
+    const { parseLenient } = await import("@/lib/llm/json");
+    const schema = z.object({ notes: z.array(z.string()).min(1).max(4) });
+    expect(() => parseLenient(schema, { notes: [] })).toThrow();
+    expect(() => parseLenient(schema, { title: "no notes" })).toThrow();
+  });
+});

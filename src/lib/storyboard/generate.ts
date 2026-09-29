@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import type { AppConfig } from "@/lib/config/schema";
 import { kvDel, kvGet, kvSet } from "@/lib/llm/cache";
-import { repairJson } from "@/lib/llm/json";
+import { parseLenient, repairJson } from "@/lib/llm/json";
 import { romanUrduStyleGuide } from "@/lib/llm/prompts/roman-urdu";
 import { generateWithFallback } from "@/lib/llm/router";
 import { logEvent } from "@/lib/observability/events";
@@ -151,7 +151,7 @@ ${languageRule(input.language)}`,
         },
       ],
     });
-    const parsed = storySchema.parse(repairJson<unknown>(response.text));
+    const parsed = parseLenient(storySchema, repairJson<unknown>(response.text));
     const panels = buildPanels(parsed.panels, sources);
     if (!panels.length) throw new Error("Storyboard had no usable panels");
     return {

@@ -97,3 +97,11 @@ describe("numbers in diagrams come from the source", () => {
     expect(visualClaims({ guard: { risk: "Phishing", protections: ["Check the sender"] } })).toEqual(["Phishing is protected against by: Check the sender."]);
   });
 });
+
+describe("diagram data that runs long", () => {
+  it("trims an over-long part instead of dropping it", () => {
+    const visual = parseLessonVisual({ chain: ["one", "two", "three", "four", "five", "six"], guard: { risk: "Phishing", protections: ["a", "b", "c", "d", "e", "f"] } });
+    expect(visual?.chain).toHaveLength(5);
+    expect(visual?.guard?.protections).toHaveLength(5);
+  });
+});

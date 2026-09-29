@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import type { AppConfig } from "@/lib/config/schema";
 import { isReadableName } from "@/lib/ingest/concepts";
-import { repairJson } from "@/lib/llm/json";
+import { parseLenient, repairJson } from "@/lib/llm/json";
 import { generateWithFallback } from "@/lib/llm/router";
 
 /** A finer idea kept inside a topic, with the chunks that support it. */
@@ -162,7 +162,7 @@ ${list}
         },
       ],
     });
-    const parsed = groupSchema.parse(repairJson<unknown>(response.text));
+    const parsed = parseLenient(groupSchema, repairJson<unknown>(response.text));
     return { topics: sanitizeGroups(parsed, units, cap), grouper: "llm" };
   } catch {
     return { topics: deterministicTopics(units, cap), grouper: "fallback" };

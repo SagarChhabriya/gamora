@@ -3,9 +3,11 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 import type { AppConfig, Persona, PlanStepType } from "@/lib/config/schema";
-import { repairJson } from "@/lib/llm/json";
+import { parseLenient, repairJson } from "@/lib/llm/json";
 import { generateWithFallback } from "@/lib/llm/router";
 import { detectLanguage } from "@/lib/ingest/language";
+import { logEvent } from "@/lib/observability/events";
+import { getOrCreateRequestId } from "@/lib/observability/request-id";
 import { languageRule, tutorSystemPrompt } from "@/lib/tutor/prompts";
 import { refsToIds, sourceBlock } from "@/lib/tutor/retrieval";
 import { parseLessonVisual, visualPromptShape } from "@/lib/visuals/schema";
@@ -18,7 +20,8 @@ const baseSchema = z.object({
   title: z.string().min(1).max(120),
   display_text: z.string().min(1).max(1_500),
   prompt: z.string().min(1).max(600),
-  hints: z.array(z.string().max(300)).default([]),
+  // Models sometimes nest hints in an extra list; flattening keeps them instead of losing the activity.
+  hints: z.preprocess((value) => (Array.isArray(value) ? value.flat(3).filter((item) => typeof item === "string") : []), z.array(z.string().max(300))),
   expected_points: z.array(z.object({ text: z.string().max(300), refs: refList })).default([]),
   source_refs: refList,
   worked_example: z.string().max(800).optional(),
@@ -112,7 +115,15 @@ export async function generateActivity(input: ActivityInput): Promise<Activity> 
     let activity = await generateStep(input, false);
     if (missedLanguage(input.language, `${activity.display_text} ${activity.prompt}`)) activity = await generateStep(input, true);
     return activity;
-  } catch {
+  } catch (error) {
+    // Recorded so a plain, source-quoting step can always be traced to its cause on the dashboard.
+    await logEvent({
+      request_id: getOrCreateRequestId(input.requestId ?? null),
+      user_hash: input.userHash,
+      type: "activity.fallback",
+      ok: false,
+      payload: { activity_type: input.type, reason: error instanceof Error ? error.message.slice(0, 200) : "unknown" },
+    }).catch(() => undefined);
     return fallbackActivity(input);
   }
 }
@@ -163,7 +174,7 @@ ${languageRule(input.language)}${retry ? `\n${retryInRomanUrdu}` : ""}`,
     ],
   });
   const json = repairJson<Record<string, unknown>>(response.text);
-  const raw = lessonSchema.parse(json);
+  const raw = parseLenient(lessonSchema, json);
   // Numbers and dates are kept only when the source chunks state them.
   const visual = groundVisual(parseLessonVisual(json.visual), chunks.map((chunk) => chunk.text).join("\n"));
   const cited = refsToIds(raw.source_refs, chunks);
@@ -186,7 +197,7 @@ ${languageRule(input.language)}${retry ? `\n${retryInRomanUrdu}` : ""}`,
 }
 
 function buildActivity(input: ActivityInput & { type: PlanStepType }, raw: Record<string, unknown>): Activity {
-  const base = baseSchema.parse(raw);
+  const base = parseLenient(baseSchema, raw);
   const { chunks, concept, type } = input;
   const cited = refsToIds([...base.source_refs, ...base.expected_points.flatMap((point) => point.refs)], chunks);
   const activity: Activity = {
@@ -206,23 +217,21 @@ function buildActivity(input: ActivityInput & { type: PlanStepType }, raw: Recor
   };
 
   if (type === "scenario" || type === "crossroads") {
-    const options = z.array(optionSchema).min(2).max(4).parse(raw.options);
+    const options = parseLenient(z.array(optionSchema).min(2).max(4), raw.options);
     if (options.filter((option) => option.correct).length !== 1) throw new Error("Scenario needs exactly one correct option");
     activity.options = options.map((option) => ({ ...option, id: randomUUID().slice(0, 8) }));
   }
   if (type === "spot_error") {
-    const steps = z.array(stepSchema).min(3).max(6).parse(raw.steps);
+    const steps = parseLenient(z.array(stepSchema).min(3).max(6), raw.steps);
     if (steps.filter((step) => step.is_error).length !== 1) throw new Error("Spot the error needs exactly one wrong step");
     activity.steps = steps.map((step) => ({ ...step, id: randomUUID().slice(0, 8) }));
   }
   if (type === "ordering") {
-    const items = z.array(z.string().min(1).max(300)).min(3).max(6).parse(raw.items);
+    const items = parseLenient(z.array(z.string().min(1).max(300)).min(3).max(6), raw.items);
     activity.items = items.map((text) => ({ id: randomUUID().slice(0, 8), text }));
   }
   if (type === "roleplay") {
-    const roleplay = z
-      .object({ character: z.string().max(80), situation: z.string().max(400), opening: z.string().max(500) })
-      .parse(raw.roleplay);
+    const roleplay = parseLenient(z.object({ character: z.string().max(80), situation: z.string().max(400), opening: z.string().max(500) }), raw.roleplay);
     activity.roleplay = { ...roleplay, max_turns: 3 };
   }
   if (input.conceptIds && input.conceptIds.length > 1) activity.concept_ids = input.conceptIds;

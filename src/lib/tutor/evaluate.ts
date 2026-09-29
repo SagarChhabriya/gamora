@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import type { AppConfig, EvidenceSignal, Persona } from "@/lib/config/schema";
-import { repairJson } from "@/lib/llm/json";
+import { parseLenient, repairJson } from "@/lib/llm/json";
 import { generateWithFallback } from "@/lib/llm/router";
 import { languageRule, learnerText, tutorSystemPrompt } from "@/lib/tutor/prompts";
 import { refsToIds, sourceBlock } from "@/lib/tutor/retrieval";
@@ -202,7 +202,7 @@ ${languageRule(ctx.language)}`,
       },
     ],
   });
-  const parsed = evalSchema.parse(repairJson<unknown>(response.text));
+  const parsed = parseLenient(evalSchema, repairJson<unknown>(response.text));
   const askFollowUp = teachBack && parsed.correctness < 0.8 && ctx.attempts === 0 && Boolean(parsed.follow_up);
   return {
     correctness: parsed.correctness,
@@ -263,7 +263,7 @@ ${languageRule(ctx.language)} Stay in this language even if the learner writes i
         })),
       ],
     });
-    const parsed = characterSchema.parse(repairJson<unknown>(response.text));
+    const parsed = parseLenient(characterSchema, repairJson<unknown>(response.text));
     return {
       correctness: 0,
       points_hit: [],

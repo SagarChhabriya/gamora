@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { repairJson } from "@/lib/llm/json";
+import { parseLenient, repairJson } from "@/lib/llm/json";
 import { generateWithFallback } from "@/lib/llm/router";
 import type { SourceChunk } from "@/lib/ingest/chunk";
 
@@ -116,7 +116,7 @@ ${source}
         },
       ],
     });
-    const plan = sanitizePlan(conceptSchema.parse(repairJson<unknown>(response.text)), chunks);
+    const plan = sanitizePlan(parseLenient(conceptSchema, repairJson<unknown>(response.text)), chunks);
     return plan.concepts.length ? plan : deterministicConcepts(chunks);
   } catch {
     return deterministicConcepts(chunks);
@@ -151,7 +151,7 @@ export async function linkConcepts(
         },
       ],
     });
-    const parsed = linkSchema.parse(repairJson<unknown>(response.text));
+    const parsed = parseLenient(linkSchema, repairJson<unknown>(response.text));
     return parsed.edges.filter((edge) => edge.from < concepts.length && edge.to < concepts.length && edge.from !== edge.to);
   } catch {
     // Fallback: a simple chain in document order keeps the journey planner usable.

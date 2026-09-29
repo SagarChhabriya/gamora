@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import type { ActivityType, AppConfig, LearningRoute, Persona, PlanStepType } from "@/lib/config/schema";
-import { repairJson } from "@/lib/llm/json";
+import { parseLenient, repairJson } from "@/lib/llm/json";
 import { generateWithFallback } from "@/lib/llm/router";
 
 export type PlannerConcept = { id: string; name: string; summary: string; difficulty: number };
@@ -257,7 +257,7 @@ ${ordered.map((concept, index) => `C${index + 1}. ${concept.name} (level ${conce
         },
       ],
     });
-    const parsed = planSchema.parse(repairJson<unknown>(response.text));
+    const parsed = parseLenient(planSchema, repairJson<unknown>(response.text));
     const seen = new Set<string>();
     const planned: PlannedMission[] = [];
     for (const mission of parsed.missions.slice(0, missions)) {
