@@ -8,12 +8,15 @@ import { AppShell } from "@/components/app-shell";
 import { Alert, Eyebrow, Meter, cx } from "@/components/ui";
 import { authFetch } from "@/lib/auth/client";
 import type { MissionView } from "@/lib/journey/load";
+import { storyboardSeenKey } from "@/lib/storyboard/story";
+import { routeInfo, type LearningRoute } from "@/lib/config/schema";
 
 type JourneyData = {
-  journey: { id: string; title: string | null; story_theme: string; planner?: string; language: string; persona: string | null };
+  journey: { id: string; title: string | null; story_theme: string; planner?: string; route?: LearningRoute; language: string; persona: string | null };
   missions: MissionView[];
   learner: { persona: string; language: string; xp: number; streak: number; best_streak: number; badges: Array<{ id: string; name: string; description: string }> };
   thresholds: { unlock: number; mastered: number };
+  storyboard?: { enabled: boolean; ready: boolean; panels: number };
 };
 
 const typeIcons: Record<string, string> = {
@@ -25,6 +28,8 @@ const typeIcons: Record<string, string> = {
   teach_back: "Teach back",
   spaced_recall: "Flashback",
   reflection: "Check in",
+  capstone: "Capstone case",
+  crossroads: "Crossroads",
 };
 
 const statusText: Record<MissionView["status"], string> = {
@@ -47,6 +52,17 @@ function JourneyMap() {
   const params = useParams<{ journeyId: string }>();
   const [data, setData] = useState<JourneyData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [seen, setSeen] = useState(false);
+
+  useEffect(() => {
+    try {
+      // Browser storage is read after mount, so the server and first client render agree.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSeen(window.localStorage.getItem(storyboardSeenKey(params.journeyId)) === "1");
+    } catch {
+      setSeen(false);
+    }
+  }, [params.journeyId]);
 
   useEffect(() => {
     authFetch(`/api/journeys/${params.journeyId}`)
@@ -68,7 +84,9 @@ function JourneyMap() {
     <div className="space-y-10">
       <header className="grid gap-6 lg:grid-cols-[1fr_auto] lg:items-end">
         <div>
-          <Eyebrow>Your journey</Eyebrow>
+          <Eyebrow>
+            Your journey{data.journey.route ? ` / ${routeInfo[data.journey.route]?.label ?? "Narrative"} route` : ""}
+          </Eyebrow>
           <h1 className="mt-3 text-4xl font-semibold leading-[0.95] tracking-[-0.035em] sm:text-5xl">{data.journey.title}</h1>
           <p className="mt-4 max-w-2xl text-lg leading-7 text-ink/70">{data.journey.story_theme}</p>
         </div>
@@ -89,6 +107,28 @@ function JourneyMap() {
           </div>
         </dl>
       </header>
+
+      {data.storyboard?.enabled ? (
+        <section
+          aria-label="Storyboard"
+          className={cx("flex flex-col gap-4 border p-5 sm:flex-row sm:items-center sm:justify-between", seen ? "border-ink/15 bg-panel" : "border-accent bg-paper")}
+        >
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-accent">{seen ? "Storyboard" : "Start here"}</p>
+            <h2 className="mt-1 text-xl font-semibold">{seen ? "Watch the storyboard again" : "See the whole journey first"}</h2>
+            <p className="mt-1 text-sm text-ink/65">
+              {data.storyboard.panels} illustrated panels, about {Math.max(1, Math.round((data.storyboard.panels * 10) / 60))} minute
+              {Math.round((data.storyboard.panels * 10) / 60) > 1 ? "s" : ""}. Every quote comes from your material.
+            </p>
+          </div>
+          <Link
+            href={`/journey/${data.journey.id}/storyboard`}
+            className={cx("inline-flex min-h-11 shrink-0 items-center justify-center px-5 text-sm font-semibold", seen ? "border border-ink/25 bg-paper hover:border-accent hover:text-accent" : "bg-accent text-paper hover:bg-ink")}
+          >
+            ▶ {seen ? "Replay" : "Play the storyboard"}
+          </Link>
+        </section>
+      ) : null}
 
       <section aria-label="Missions">
         <ol className="relative space-y-4 border-l-2 border-ink/15 pl-6">

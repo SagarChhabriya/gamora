@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { requireUser } from "@/lib/auth/server";
+import { getActiveConfig } from "@/lib/config/active";
 import { personas } from "@/lib/config/schema";
+import { resolveTopicCap } from "@/lib/ingest/topics";
 import { logEvent } from "@/lib/observability/events";
 import { getOrCreateRequestId } from "@/lib/observability/request-id";
 import { supabaseRequest } from "@/lib/supabase/server";
@@ -12,11 +14,17 @@ export const runtime = "nodejs";
 export async function GET(request: Request) {
   const auth = await requireUser(request);
   if (auth.error) return auth.error;
-  const rows = await supabaseRequest<Array<{ display_name: string | null; role: string; persona: string | null; language_pref: string; time_budget_min: number; onboarding: Record<string, unknown> }>>(
-    `profiles?id=eq.${auth.user.id}&select=display_name,role,persona,language_pref,time_budget_min,onboarding`,
+  const rows = await supabaseRequest<Array<{ display_name: string | null; role: string; persona: string | null; language_pref: string; time_budget_min: number; onboarding: Record<string, unknown>; topic_cap: number | null }>>(
+    `profiles?id=eq.${auth.user.id}&select=display_name,role,persona,language_pref,time_budget_min,onboarding,topic_cap`,
   );
   const profile = rows?.[0];
-  return NextResponse.json({ profile, onboarded: Boolean(profile?.onboarding && Object.keys(profile.onboarding).length) });
+  const { config } = await getActiveConfig();
+  return NextResponse.json({
+    profile,
+    onboarded: Boolean(profile?.onboarding && Object.keys(profile.onboarding).length),
+    // What the learning preferences page needs to show the limit and its allowed range.
+    topics: { value: resolveTopicCap(profile?.topic_cap, config), custom: profile?.topic_cap ?? null, default: config.content.topics_default, max: config.content.topics_max, min: 3 },
+  });
 }
 
 const updateSchema = z.object({
@@ -24,6 +32,8 @@ const updateSchema = z.object({
   persona: z.enum(personas).optional(),
   language_pref: z.enum(["en", "roman_ur"]).optional(),
   time_budget_min: z.number().int().min(3).max(240).optional(),
+  // Null returns to the default. The upper bound is checked against the admin limit below.
+  topic_cap: z.number().int().min(3).max(40).nullable().optional(),
   onboarding: z
     .object({
       role: z.string().trim().max(120).optional(),
@@ -41,6 +51,12 @@ export async function PATCH(request: Request) {
   if (auth.error) return auth.error;
   const parsed = updateSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Invalid profile update" }, { status: 400 });
+  if (typeof parsed.data.topic_cap === "number") {
+    const { config } = await getActiveConfig();
+    if (parsed.data.topic_cap > config.content.topics_max) {
+      return NextResponse.json({ error: `Choose at most ${config.content.topics_max} topics` }, { status: 400 });
+    }
+  }
   await supabaseRequest(`profiles?id=eq.${auth.user.id}`, {
     method: "PATCH",
     headers: { Prefer: "return=minimal" },

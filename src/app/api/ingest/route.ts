@@ -6,6 +6,8 @@ import { getActiveConfig } from "@/lib/config/active";
 import { RemoteSourceError, parseFile, parseRemoteSource, parseTextSource } from "@/lib/ingest/parse";
 import { createIngestJob } from "@/lib/ingest/pipeline";
 import { scanForPromptInjection } from "@/lib/ingest/security";
+import { resolveTopicCap } from "@/lib/ingest/topics";
+import { supabaseRequest } from "@/lib/supabase/server";
 import { logEvent } from "@/lib/observability/events";
 import { getOrCreateRequestId } from "@/lib/observability/request-id";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
@@ -24,8 +26,11 @@ const bodySchema = z.object({
 export async function GET(request: Request) {
   const auth = await requireUser(request);
   if (auth.error) return auth.error;
-  const { config } = await getActiveConfig();
-  return NextResponse.json({ url_domains: config.content.url_domains });
+  const [{ config }, profiles] = await Promise.all([
+    getActiveConfig(),
+    supabaseRequest<Array<{ topic_cap: number | null }>>(`profiles?id=eq.${auth.user.id}&select=topic_cap`).catch(() => null),
+  ]);
+  return NextResponse.json({ url_domains: config.content.url_domains, topic_cap: resolveTopicCap(profiles?.[0]?.topic_cap, config), topics_max: config.content.topics_max });
 }
 
 /** Creates an ingest job. The client then calls POST /api/ingest/<content_id>/step until complete. */
@@ -80,7 +85,12 @@ export async function POST(request: Request) {
       );
     }
 
-    const created = await createIngestJob({ ownerId: auth.user.id, title, sourceType, text });
+    const [{ config }, profiles] = await Promise.all([
+      getActiveConfig(),
+      supabaseRequest<Array<{ topic_cap: number | null }>>(`profiles?id=eq.${auth.user.id}&select=topic_cap`),
+    ]);
+    const topicCap = resolveTopicCap(profiles?.[0]?.topic_cap, config);
+    const created = await createIngestJob({ ownerId: auth.user.id, title, sourceType, text, topicCap });
     await logEvent({
       request_id: requestId,
       user_hash: auth.user.userHash,

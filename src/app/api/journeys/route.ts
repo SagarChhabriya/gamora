@@ -1,13 +1,14 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { requireUser } from "@/lib/auth/server";
 import { getActiveConfig } from "@/lib/config/active";
-import { personas, type Persona } from "@/lib/config/schema";
+import { learningRoutes, personas, type Persona } from "@/lib/config/schema";
 import { logEvent } from "@/lib/observability/events";
 import { getOrCreateRequestId } from "@/lib/observability/request-id";
 import { planJourney } from "@/lib/planner/plan";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
+import { ensureStoryboard, loadJourneyForStoryboard } from "@/lib/storyboard/generate";
 import { supabaseRequest } from "@/lib/supabase/server";
 import { reportError } from "@/lib/observability/sentry";
 
@@ -20,7 +21,7 @@ type Profile = { persona: string | null; language_pref: string; time_budget_min:
 export async function GET(request: Request) {
   const auth = await requireUser(request);
   if (auth.error) return auth.error;
-  const journeys = await supabaseRequest<Array<{ id: string; title: string | null; content_id: string; language: string; persona: string | null; created_at: string; plan: { story_theme?: string } }>>(
+  const journeys = await supabaseRequest<Array<{ id: string; title: string | null; content_id: string; language: string; persona: string | null; created_at: string; plan: { story_theme?: string; route?: string } }>>(
     `journeys?learner_id=eq.${auth.user.id}&status=eq.ready&select=id,title,content_id,language,persona,created_at,plan&order=created_at.desc&limit=30`,
   );
   const ids = (journeys ?? []).map((journey) => journey.id);
@@ -36,12 +37,12 @@ export async function GET(request: Request) {
     journeys: (journeys ?? []).map((journey) => {
       const total = (missions ?? []).filter((mission) => mission.journey_id === journey.id).length;
       const done = new Set((sessions ?? []).filter((session) => session.journey_id === journey.id).map((session) => session.mission_id)).size;
-      return { id: journey.id, title: journey.title, story_theme: journey.plan?.story_theme ?? "", language: journey.language, persona: journey.persona, created_at: journey.created_at, missions_total: total, missions_done: done };
+      return { id: journey.id, title: journey.title, story_theme: journey.plan?.story_theme ?? "", route: journey.plan?.route ?? "narrative", language: journey.language, persona: journey.persona, created_at: journey.created_at, missions_total: total, missions_done: done };
     }),
   });
 }
 
-const createSchema = z.object({ content_id: z.string().uuid() });
+const createSchema = z.object({ content_id: z.string().uuid(), route: z.enum(learningRoutes).default("narrative") });
 
 /** Plans a new journey from a ready content map, personalised to the learner profile. */
 export async function POST(request: Request) {
@@ -66,7 +67,7 @@ export async function POST(request: Request) {
     if (content.status !== "ready") return NextResponse.json({ error: "This source is still being processed" }, { status: 409 });
 
     const [concepts, profiles, active] = await Promise.all([
-      supabaseRequest<Array<{ id: string; name: string; summary: string; difficulty: number }>>(`concepts?content_id=eq.${contentId}&select=id,name,summary,difficulty&order=created_at.asc`),
+      supabaseRequest<Array<{ id: string; name: string; summary: string; difficulty: number }>>(`concepts?content_id=eq.${contentId}&retired_at=is.null&select=id,name,summary,difficulty&order=created_at.asc`),
       supabaseRequest<Profile[]>(`profiles?id=eq.${auth.user.id}&select=persona,language_pref,time_budget_min,onboarding`),
       getActiveConfig(),
     ]);
@@ -88,6 +89,7 @@ export async function POST(request: Request) {
         prior: profile?.onboarding?.prior,
         time_budget_min: profile?.time_budget_min ?? active.config.learner.session_minutes,
         language,
+        route: parsed.data.route,
       },
       config: active.config,
       configVersion: active.version,
@@ -106,7 +108,7 @@ export async function POST(request: Request) {
         language,
         persona,
         status: "ready",
-        plan: { title: plan.title, story_theme: plan.story_theme, planner: plan.planner },
+        plan: { title: plan.title, story_theme: plan.story_theme, planner: plan.planner, route: plan.route },
       }),
     });
     const journeyId = journeys?.[0]?.id;
@@ -131,8 +133,15 @@ export async function POST(request: Request) {
       user_hash: auth.user.userHash,
       type: "journey.created",
       latency_ms: Date.now() - started,
-      payload: { journey_id: journeyId, content_id: contentId, missions: plan.missions.length, planner: plan.planner, persona, language },
+      payload: { journey_id: journeyId, content_id: contentId, missions: plan.missions.length, planner: plan.planner, persona, language, route: plan.route },
     });
+    if (active.config.mechanics.storyboard) {
+      // Build the storyboard while the learner reads the journey map, so it is ready when they press play.
+      after(async () => {
+        const journey = await loadJourneyForStoryboard(journeyId).catch(() => null);
+        if (journey) await ensureStoryboard({ journey, config: active.config, requestId, userHash: auth.user.userHash }).catch(() => undefined);
+      });
+    }
     return NextResponse.json({ journey_id: journeyId, planner: plan.planner }, { status: 201 });
   } catch (error) {
     reportError(error, { requestId, userHash: auth.user.userHash, area: "journey.plan" });

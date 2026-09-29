@@ -1,17 +1,20 @@
-import type { ActivityType, EvidenceSignal, Persona } from "@/lib/config/schema";
+import type { EvidenceSignal, Persona, PlanStepType } from "@/lib/config/schema";
+import type { LessonVisual } from "@/lib/visuals/views";
 
 export type Language = "en" | "roman_ur";
 export type Pace = "brisk" | "normal" | "gentle";
 export type Modality = "open" | "choices";
 
 /** A lesson teaches a concept before any question about it. It is not evaluated. */
-export type StepType = ActivityType | "lesson";
+export type StepType = PlanStepType | "lesson";
 
 export type Lesson = {
   key_idea: string;
   notes: string[];
   flow: string[];
   example: string;
+  /** Extra data for the other views of this lesson. Only what the source supports. */
+  visual?: LessonVisual;
 };
 
 export type SourceChunk = { id: string; idx: number; text: string; ref: string };
@@ -24,6 +27,8 @@ export type Activity = {
   type: StepType;
   concept_id: string;
   concept_name: string;
+  /** A capstone case draws on several topics. Evidence is recorded for each of them. */
+  concept_ids?: string[];
   difficulty: number;
   title: string;
   display_text: string;
@@ -77,7 +82,9 @@ export type SessionState = PolicyState & {
   mission_id: string;
   journey_id: string;
   persona: Persona;
-  queue: Array<{ type: StepType; concept_id: string; intent: string }>;
+  queue: Array<{ type: StepType; concept_id: string; intent: string; concept_ids?: string[] }>;
+  /** What the last Crossroads choice led to, handed to the next step and then cleared. */
+  carry?: string;
   index: number;
   current: Activity | null;
   prefetched: Activity | null;

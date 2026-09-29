@@ -85,7 +85,9 @@ describe("journey planner", () => {
 
   it("fits the learner's time budget and unlocks by mastery", () => {
     const plan = fallbackPlan("T", concepts, [], { persona: "busy_rm", time_budget_min: 10, language: "en" }, defaultConfig);
-    expect(plan.missions.length).toBe(2);
+    // Two missions fit the time budget; the closing capstone case comes after them.
+    expect(plan.missions.length).toBe(3);
+    expect(plan.missions.at(-1)?.title).toBe("Capstone case");
     expect(plan.missions[1].unlock_rule).toEqual({ min_mastery: defaultConfig.mastery.unlock_threshold, after_mission: 0 });
   });
 

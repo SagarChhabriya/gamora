@@ -94,9 +94,9 @@ export function AppShell({ children, requireRole, wide }: Props) {
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:bg-ink focus:px-3 focus:py-2 focus:text-paper">
         Skip to content
       </a>
-      <header className="border-b border-ink/15">
-        <div className={cx("mx-auto flex flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-8", wide ? "max-w-[1440px]" : "max-w-6xl")}>
-          <Link href="/" className="text-base font-semibold uppercase tracking-[0.22em]">
+      <header className="sticky top-0 z-30 border-b border-ink/15 bg-paper/95 backdrop-blur">
+        <div className={cx("mx-auto flex items-center justify-between gap-2 px-4 py-2.5 sm:gap-3 sm:px-8 sm:py-4", wide ? "max-w-[1440px]" : "max-w-6xl")}>
+          <Link href="/" className="text-sm font-semibold uppercase tracking-[0.18em] sm:text-base sm:tracking-[0.22em]">
             Gamora
           </Link>
           <nav aria-label="Main" className="flex items-center gap-1 text-sm">
@@ -107,7 +107,7 @@ export function AppShell({ children, requireRole, wide }: Props) {
                   key={link.href}
                   href={link.href}
                   aria-current={active ? "page" : undefined}
-                  className={cx("px-3 py-2 font-medium", active ? "text-accent underline underline-offset-8" : "text-ink/70 hover:text-ink")}
+                  className={cx("px-2 py-2 font-medium sm:px-3", active ? "text-accent underline underline-offset-8" : "text-ink/70 hover:text-ink")}
                 >
                   {link.label}
                 </Link>

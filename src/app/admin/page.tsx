@@ -182,6 +182,12 @@ function AdminDashboard() {
                   <dd className="font-semibold">{d.quality.abstains}</dd>
                 </div>
                 <div>
+                  <dt className="text-ink/60">Replies rated useful</dt>
+                  <dd className="font-semibold">
+                    {pct(d.quality.replies_useful_rate)} <span className="font-normal text-ink/55">({d.quality.replies_rated} ratings)</span>
+                  </dd>
+                </div>
+                <div>
                   <dt className="text-ink/60">Questions answered from source</dt>
                   <dd className="font-semibold">
                     {d.quality.question_abstain_rate === null ? "n/a" : pct(1 - d.quality.question_abstain_rate)} <span className="font-normal text-ink/55">of {d.quality.questions}</span>

@@ -170,6 +170,7 @@ export function computeDashboard(raw: Raw, config: AppConfig, options: { reveal:
   const grounding = raw.events.filter((event) => event.type === "grounding.check");
   const asks = raw.events.filter((event) => event.type === "tutor.ask");
   const adaptations = raw.events.filter((event) => event.type === "adapt.decision");
+  const ratings = raw.events.filter((event) => event.type === "reply.rated");
   const reasonCounts = new Map<string, number>();
   for (const event of adaptations) for (const code of (event.payload.reasons as string[] | undefined) ?? []) reasonCounts.set(code, (reasonCounts.get(code) ?? 0) + 1);
 
@@ -228,6 +229,9 @@ export function computeDashboard(raw: Raw, config: AppConfig, options: { reveal:
       grounding_pass_rate: grounding.length ? grounding.filter((event) => event.ok).length / grounding.length : null,
       grounding_checks: grounding.length,
       abstains: raw.events.filter((event) => event.type === "grounding.abstain").length,
+      // Learners rate tutor replies useful or not. Only the verdict is stored, never the reply text.
+      replies_rated: ratings.length,
+      replies_useful_rate: ratings.length ? ratings.filter((event) => event.payload.useful === true).length / ratings.length : null,
       questions: asks.length,
       question_abstain_rate: asks.length ? asks.filter((event) => event.payload.abstained).length / asks.length : null,
       adaptations: adaptations.length,

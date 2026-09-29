@@ -47,7 +47,7 @@ export function signalsFor(input: {
   } else if (correctness >= 0.8) {
     if (selfCorrection || attempts > 0) signals.push({ signal: "self_corrected", strength: 0.6 });
     else signals.push({ signal: "correct", strength: hintsUsed ? 0.6 : 1 });
-    if ((type === "scenario" || type === "roleplay") && attempts === 0) signals.push({ signal: "transfer", strength: 1 });
+    if ((type === "scenario" || type === "crossroads" || type === "roleplay" || type === "capstone") && attempts === 0) signals.push({ signal: "transfer", strength: 1 });
     if (type === "teach_back") signals.push({ signal: "teach_back", strength: 1 });
   } else if (correctness >= 0.4) {
     signals.push({ signal: "partial", strength: 0.4 });
@@ -60,12 +60,13 @@ export function signalsFor(input: {
 
 function choiceEvaluation(ctx: Context): Evaluation {
   const { activity, answer, attempts, language } = ctx;
-  if (activity.type === "scenario") {
+  if (activity.type === "scenario" || activity.type === "crossroads") {
     const chosen = activity.options?.find((option) => option.id === answer.choice_id);
     if (!chosen) throw new Error("Choose one of the options");
     const correct = chosen.correct;
     const best = activity.options?.find((option) => option.correct);
-    const finalTry = correct || attempts >= 1;
+    // At a crossroads the path is taken: whatever the choice, the story moves on from it.
+    const finalTry = correct || attempts >= 1 || activity.type === "crossroads";
     return {
       correctness: correct ? 1 : 0,
       points_hit: correct ? [chosen.text] : [],
@@ -285,6 +286,7 @@ ${languageRule(ctx.language)} Stay in this language even if the learner writes i
 export async function evaluateAnswer(ctx: Context): Promise<Evaluation> {
   switch (ctx.activity.type) {
     case "scenario":
+    case "crossroads":
     case "spot_error":
     case "ordering":
       return choiceEvaluation(ctx);

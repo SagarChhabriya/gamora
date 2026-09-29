@@ -84,6 +84,7 @@ export function snapshotLinks(snapshot: LearnerSnapshot): AssistantLink[] {
     { id: "L1", label: "Your journeys", href: "/" },
     { id: "L2", label: "Studio: add material", href: "/studio" },
     { id: "L3", label: "Update my profile", href: "/onboarding" },
+    { id: "L4", label: "Learning preferences", href: "/profile" },
   ];
   for (const journey of snapshot.journeys) {
     links.push({ id: `L${links.length + 1}`, label: `Journey map: ${journey.title}`, href: `/journey/${journey.id}` });

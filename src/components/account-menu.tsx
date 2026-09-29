@@ -89,6 +89,9 @@ export function AccountMenu({ session }: { session: SessionPayload }) {
             </div>
           ) : (
             <div className="py-1">
+              <Link role="menuitem" href="/profile" className={item} onClick={() => setOpen(false)}>
+                Learning preferences
+              </Link>
               <Link role="menuitem" href="/onboarding" className={item} onClick={() => setOpen(false)}>
                 Update my profile
               </Link>

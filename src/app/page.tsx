@@ -5,8 +5,10 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { AppShell } from "@/components/app-shell";
+import { RouteChooser } from "@/components/route-chooser";
 import { Alert, Button, Eyebrow, Meter } from "@/components/ui";
 import { authFetch } from "@/lib/auth/client";
+import type { LearningRoute } from "@/lib/config/schema";
 import type { SessionPayload } from "@/lib/auth/supabase-auth";
 
 type Journey = { id: string; title: string | null; story_theme: string; language: string; missions_total: number; missions_done: number; created_at: string };
@@ -17,6 +19,7 @@ function Home({ session }: { session: SessionPayload }) {
   const [journeys, setJourneys] = useState<Journey[] | null>(null);
   const [library, setLibrary] = useState<Content[]>([]);
   const [building, setBuilding] = useState<string | null>(null);
+  const [choosing, setChoosing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [needsProfile, setNeedsProfile] = useState(false);
@@ -43,13 +46,13 @@ function Home({ session }: { session: SessionPayload }) {
     })();
   }, [router]);
 
-  async function build(contentId: string) {
+  async function build(contentId: string, route: LearningRoute) {
     setBuilding(contentId);
     setError(null);
     const response = await authFetch("/api/journeys", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content_id: contentId }),
+      body: JSON.stringify({ content_id: contentId, route }),
     });
     const payload = (await response.json()) as { journey_id?: string; error?: string };
     if (payload.journey_id) router.push(`/journey/${payload.journey_id}`);
@@ -124,9 +127,10 @@ function Home({ session }: { session: SessionPayload }) {
                   <p className="font-semibold">{item.title}</p>
                   <p className="text-xs text-ink/55">{item.mine ? "Your material" : "From the Gamora library"}</p>
                 </div>
-                <Button variant="secondary" disabled={building !== null} onClick={() => build(item.id)}>
+                <Button variant="secondary" disabled={building !== null} onClick={() => setChoosing(choosing === item.id ? null : item.id)} aria-expanded={choosing === item.id}>
                   {building === item.id ? "Planning..." : "Start a journey"}
                 </Button>
+                {choosing === item.id ? <RouteChooser busy={building !== null} onChoose={(route) => void build(item.id, route)} onCancel={() => setChoosing(null)} /> : null}
               </li>
             ))}
           </ul>

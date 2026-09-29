@@ -6,6 +6,8 @@ import { personaLabels, personas, type ActivityType, type AppConfig, type Person
 import { applyRewards, badgeCatalog, emptyGamification, starsFor, type GamificationRow } from "@/lib/gamification/rewards";
 import { answerQuestion, generateGroundedActivity } from "@/lib/grounding/verify";
 import { detectLanguage } from "@/lib/ingest/language";
+import { stepFocus, type KeyPoint } from "@/lib/ingest/topics";
+import { storyContextFor, type Storyboard } from "@/lib/storyboard/story";
 import { applyEvidence, decayed, emptyMastery, type MasteryRow } from "@/lib/learner-model/mastery";
 import { kvDel, kvGet, kvSet } from "@/lib/llm/cache";
 import { logEvent } from "@/lib/observability/events";
@@ -14,7 +16,7 @@ import { toClientActivity } from "@/lib/tutor/activity";
 import { evaluateAnswer, type LearnerAnswer } from "@/lib/tutor/evaluate";
 import { decide, initialPolicyState } from "@/lib/tutor/policy";
 import { retrieveForConcept } from "@/lib/tutor/retrieval";
-import { historyFromTurns, stepKinds, withLessons, type HistoryItem, type Position, type TurnRow } from "@/lib/tutor/session";
+import { historyFromTurns, stepKinds, withCrossroads, withLessons, type HistoryItem, type Position, type TurnRow } from "@/lib/tutor/session";
 import type { Activity, AdaptationReason, ClientActivity, Evaluation, Language, SessionState, SourceChunk } from "@/lib/tutor/types";
 
 export const turnSchema = z.object({
@@ -38,7 +40,7 @@ export type TurnEvent =
   | { type: "character"; text: string; name: string }
   | { type: "hint"; text: string; remaining: number }
   | { type: "answer"; text: string; sources: ClientActivity["sources"]; abstained: boolean }
-  | { type: "adaptation"; reasons: AdaptationReason[]; state: { difficulty: number; pace: string; modality: string; language: Language; persona: Persona; text_only: boolean } }
+  | { type: "adaptation"; reasons: AdaptationReason[]; state: TuningState }
   | { type: "mastery"; concepts: Array<{ id: string; name: string; mastery: number; delta: number }> }
   | { type: "xp"; gained: number; total: number; streak: number; new_badges: Array<{ id: string; name: string; description: string }> }
   | { type: "activity"; activity: ClientActivity; position: Position }
@@ -46,6 +48,19 @@ export type TurnEvent =
   | { type: "mission_complete"; summary: MissionSummary }
   | { type: "error"; message: string }
   | { type: "done"; session_id: string };
+
+/** What the Tuning panel shows: the settings the policy is using right now, and how much evidence it has. */
+export type TuningState = {
+  difficulty: number;
+  pace: string;
+  modality: string;
+  language: Language;
+  persona: Persona;
+  text_only: boolean;
+  worked_example: boolean;
+  evidence_count: number;
+  focus: string | null;
+};
 
 export type MissionSummary = {
   mission_id: string;
@@ -59,8 +74,8 @@ export type MissionSummary = {
 };
 
 type Mission = { id: string; journey_id: string; idx: number; title: string; story: string; concept_ids: string[]; activities: SessionState["queue"]; unlock_rule: { min_mastery?: number } };
-type Journey = { id: string; learner_id: string; content_id: string; language: string; persona: string | null };
-type Concept = { id: string; name: string; summary: string; difficulty: number; source_chunk_ids: string[]; content_id: string };
+type Journey = { id: string; learner_id: string; content_id: string; language: string; persona: string | null; plan?: { route?: string; storyboard?: Pick<Storyboard, "setting" | "cast"> } | null };
+type Concept = { id: string; name: string; summary: string; difficulty: number; source_chunk_ids: string[]; content_id: string; key_points?: KeyPoint[] | null };
 type SessionRow = { id: string; state: SessionState; language: string };
 
 class TurnError extends Error {}
@@ -69,7 +84,7 @@ async function loadMissionContext(missionId: string, user: AuthUser) {
   const missions = await supabaseRequest<Mission[]>(`missions?id=eq.${missionId}&select=id,journey_id,idx,title,story,concept_ids,activities,unlock_rule`);
   const mission = missions?.[0];
   if (!mission) throw new TurnError("Mission not found");
-  const journeys = await supabaseRequest<Journey[]>(`journeys?id=eq.${mission.journey_id}&select=id,learner_id,content_id,language,persona`);
+  const journeys = await supabaseRequest<Journey[]>(`journeys?id=eq.${mission.journey_id}&select=id,learner_id,content_id,language,persona,plan`);
   const journey = journeys?.[0];
   if (!journey || (journey.learner_id !== user.id && user.role !== "admin")) throw new TurnError("Mission not found");
   return { mission, journey };
@@ -77,7 +92,7 @@ async function loadMissionContext(missionId: string, user: AuthUser) {
 
 async function loadConcepts(ids: string[]) {
   if (!ids.length) return new Map<string, Concept>();
-  const rows = await supabaseRequest<Concept[]>(`concepts?id=in.(${[...new Set(ids)].join(",")})&select=id,name,summary,difficulty,source_chunk_ids,content_id`);
+  const rows = await supabaseRequest<Concept[]>(`concepts?id=in.(${[...new Set(ids)].join(",")})&select=id,name,summary,difficulty,source_chunk_ids,content_id,key_points`);
   return new Map((rows ?? []).map((row) => [row.id, row]));
 }
 
@@ -143,7 +158,9 @@ async function getOrCreateSession(input: { user: AuthUser; mission: Mission; jou
     mission_id: input.mission.id,
     journey_id: input.journey.id,
     persona: input.persona,
-    queue: (input.mission.activities ?? []).filter((item) => input.config.mechanics.enabled_activities.includes(item.type as ActivityType)),
+    queue: (input.mission.activities ?? []).filter((item) =>
+      item.type === "capstone" ? input.config.mechanics.capstone : input.config.mechanics.enabled_activities.includes(item.type as ActivityType),
+    ),
     index: 0,
     current: null,
     prefetched: null,
@@ -159,6 +176,7 @@ async function getOrCreateSession(input: { user: AuthUser; mission: Mission; jou
   };
   if (!state.queue.length) state.queue = input.mission.concept_ids.map((id) => ({ type: "explain_ask" as ActivityType, concept_id: id, intent: "introduce" }));
   state.queue = withLessons(state.queue);
+  if (input.config.mechanics.crossroads) state.queue = withCrossroads(state.queue);
   const rows = await supabaseRequest<SessionRow[]>("sessions?select=id,state,language", {
     method: "POST",
     headers: { Prefer: "return=representation" },
@@ -190,8 +208,8 @@ type Ctx = {
   concepts: Map<string, Concept>;
 };
 
-async function chunksFor(concept: Concept) {
-  return retrieveForConcept({ contentId: concept.content_id, sourceChunkIds: concept.source_chunk_ids, query: concept.name, limit: 4 });
+async function chunksFor(concept: Concept, focus?: { query: string; chunkIds: string[] }) {
+  return retrieveForConcept({ contentId: concept.content_id, sourceChunkIds: focus?.chunkIds ?? concept.source_chunk_ids, query: focus?.query ?? concept.name, limit: 4 });
 }
 
 /** Generates, verifies, and if needed regenerates or abstains. */
@@ -200,11 +218,31 @@ async function buildActivity(ctx: Ctx, state: SessionState, index: number): Prom
   const concept = ctx.concepts.get(item.concept_id) ?? (await loadConcepts([item.concept_id])).get(item.concept_id);
   if (!concept) throw new TurnError("Concept not found for this activity");
   ctx.concepts.set(concept.id, concept);
-  const chunks = await chunksFor(concept);
+  // A grouped topic is practised one key point at a time, in turn across the mission.
+  const focus = stepFocus(concept, state.queue.slice(0, index).filter((step) => step.concept_id === concept.id && step.type !== "lesson").length, item.type === "lesson");
+  let chunks = await chunksFor(concept, focus);
+  let brief = { name: concept.name, summary: focus.summary };
+  // A capstone case needs every one of its topics, so it gathers sources from each of them.
+  const capstoneIds = item.type === "capstone" ? [...new Set([item.concept_id, ...(item.concept_ids ?? [])])] : [];
+  if (capstoneIds.length > 1) {
+    const missing = capstoneIds.filter((id) => !ctx.concepts.has(id));
+    if (missing.length) for (const [id, row] of await loadConcepts(missing)) ctx.concepts.set(id, row);
+    const topics = capstoneIds.map((id) => ctx.concepts.get(id)).filter((row): row is Concept => Boolean(row));
+    const perTopic = await Promise.all(topics.map((topic) => retrieveForConcept({ contentId: topic.content_id, sourceChunkIds: topic.source_chunk_ids.slice(0, 2), query: topic.name, limit: 2 })));
+    const seen = new Set<string>();
+    chunks = perTopic
+      .flat()
+      .filter((chunk) => !seen.has(chunk.id) && Boolean(seen.add(chunk.id)))
+      .slice(0, 6)
+      .map((chunk, position) => ({ ...chunk, ref: `S${position + 1}` }));
+    brief = { name: topics.map((topic) => topic.name).join(" + "), summary: `Topics this case combines: ${topics.map((topic) => `${topic.name}: ${topic.summary.slice(0, 160)}`).join(" | ")}` };
+  }
   const recentReply = state.roleplay_turns.filter((turn) => turn.role === "learner").at(-1)?.text;
   const input = {
     type: state.text_only && item.type === "roleplay" ? ("scenario" as ActivityType) : item.type,
-    concept: { id: concept.id, name: concept.name, summary: concept.summary },
+    concept: { id: concept.id, ...brief },
+    conceptIds: capstoneIds.length > 1 ? capstoneIds : undefined,
+    carryOver: state.carry,
     chunks,
     difficulty: state.difficulty,
     pace: state.pace,
@@ -214,6 +252,7 @@ async function buildActivity(ctx: Ctx, state: SessionState, index: number): Prom
     intent: item.intent,
     workedExample: state.worked_example,
     learnerContext: recentReply,
+    storyContext: storyContextFor(ctx.journey.plan?.storyboard),
     config: ctx.config,
     requestId: ctx.requestId,
     userHash: ctx.user.userHash,
@@ -252,7 +291,17 @@ function adaptationEvent(state: SessionState, reasons: AdaptationReason[]): Turn
   return {
     type: "adaptation",
     reasons,
-    state: { difficulty: state.difficulty, pace: state.pace, modality: state.modality, language: state.language, persona: state.persona, text_only: state.text_only },
+    state: {
+      difficulty: state.difficulty,
+      pace: state.pace,
+      modality: state.modality,
+      language: state.language,
+      persona: state.persona,
+      text_only: state.text_only,
+      worked_example: state.worked_example,
+      evidence_count: state.evidence.length,
+      focus: state.current?.concept_name ?? null,
+    },
   };
 }
 
@@ -280,7 +329,8 @@ async function stats(learnerId: string): Promise<TurnEvent> {
 
 async function presentActivity(ctx: Ctx, session: SessionRow, state: SessionState): Promise<TurnEvent[]> {
   const key = prefetchKey(session.id, state.index, state);
-  const cached = await kvGet<{ activity: Activity; chunkIds: string[] }>(key);
+  // A step that picks up from a Crossroads choice is built fresh, since the prefetched one predates the choice.
+  const cached = state.carry ? null : await kvGet<{ activity: Activity; chunkIds: string[] }>(key);
   let activity: Activity;
   let chunkIds: string[];
   if (cached) {
@@ -298,6 +348,8 @@ async function presentActivity(ctx: Ctx, session: SessionRow, state: SessionStat
   state.roleplay_turns = activity.roleplay ? [{ role: "character", text: activity.roleplay.opening }] : [];
   state.asked_at = Date.now();
   state.worked_example = false;
+  // The carried outcome has been used by this step.
+  state.carry = undefined;
   await saveState(session.id, state);
   const sourceChunks = await allChunks([...activity.source_chunk_ids, ...chunkIds]);
   const client = toClientActivity(activity, sourceChunks);
@@ -310,6 +362,8 @@ async function presentActivity(ctx: Ctx, session: SessionRow, state: SessionStat
 export async function prefetchNext(ctx: Ctx, sessionId: string, state: SessionState) {
   const next = state.index + 1;
   if (next >= state.queue.length) return;
+  // After a Crossroads the next step depends on the choice, so there is nothing useful to prefetch.
+  if (state.current?.type === "crossroads") return;
   const key = prefetchKey(sessionId, next, state);
   if (await kvGet(key)) return;
   try {
@@ -365,7 +419,7 @@ async function countMastered(learnerId: string, config: AppConfig) {
   return rows?.length ?? 0;
 }
 
-async function reward(ctx: Ctx, input: { signals: Evaluation["signals"]; activityType?: string; missionCompleted?: boolean }): Promise<TurnEvent | null> {
+async function reward(ctx: Ctx, input: { signals: Evaluation["signals"]; activityType?: string; missionCompleted?: boolean; hintsUsed?: number; correctness?: number }): Promise<TurnEvent | null> {
   if (!input.signals.length && !input.missionCompleted) return null;
   const row = await loadGamification(ctx.user.id);
   const mastered = await countMastered(ctx.user.id, ctx.config);
@@ -530,7 +584,7 @@ export async function* runTurn(user: AuthUser, body: TurnRequest, requestId: str
   const answer: LearnerAnswer = { reply: body.reply, choice_id: body.choice_id, order: body.order, confidence: body.confidence };
   const activityConcept = concepts.get(activity.concept_id) ?? (await loadConcepts([activity.concept_id])).get(activity.concept_id);
   if (!activityConcept) throw new TurnError("Concept not found for this activity");
-  const [chunks, masteryMap] = await Promise.all([chunksFor(activityConcept), loadMastery(user.id, [activity.concept_id])]);
+  const [chunks, masteryMap] = await Promise.all([chunksFor(activityConcept, { query: activity.concept_name, chunkIds: [...new Set([...activity.source_chunk_ids, ...activityConcept.source_chunk_ids])] }), loadMastery(user.id, [activity.concept_id])]);
   const masteryNow = decayed(masteryMap.get(activity.concept_id) ?? emptyMastery, config);
   yield { type: "status", text: activity.type === "roleplay" ? "..." : "Reading your answer..." };
 
@@ -603,12 +657,21 @@ export async function* runTurn(user: AuthUser, body: TurnRequest, requestId: str
   };
 
   // Evidence, mastery, and rewards.
-  const change = await recordEvidence(ctx, session.id, activity.concept_id, evaluation);
-  if (change) {
-    yield { type: "mastery", concepts: [{ id: activity.concept_id, name: activity.concept_name, mastery: change.after, delta: change.after - change.before }] };
-    await logEvent({ request_id: requestId, user_hash: user.userHash, type: "evidence.recorded", payload: { concept_id: activity.concept_id, signals: evaluation.signals.map((signal) => signal.signal), mastery: change.after, delta: change.after - change.before } });
+  // A capstone case is evidence for every topic it combines.
+  const evidenceFor = activity.concept_ids?.length ? activity.concept_ids : [activity.concept_id];
+  for (const conceptId of evidenceFor) {
+    const change = await recordEvidence(ctx, session.id, conceptId, evaluation);
+    if (!change) continue;
+    const name = conceptId === activity.concept_id && !activity.concept_ids?.length ? activity.concept_name : (ctx.concepts.get(conceptId)?.name ?? activity.concept_name);
+    yield { type: "mastery", concepts: [{ id: conceptId, name, mastery: change.after, delta: change.after - change.before }] };
+    await logEvent({ request_id: requestId, user_hash: user.userHash, type: "evidence.recorded", payload: { concept_id: conceptId, signals: evaluation.signals.map((signal) => signal.signal), mastery: change.after, delta: change.after - change.before } });
   }
-  const xp = await reward(ctx, { signals: evaluation.signals, activityType: activity.type });
+  if (activity.type === "crossroads" && evaluation.done) {
+    // The path the learner took carries into the next step, so the choice shapes what happens next.
+    const chosen = activity.options?.find((option) => option.id === body.choice_id);
+    if (chosen) state.carry = `The learner chose "${chosen.text}". ${chosen.consequence}`;
+  }
+  const xp = await reward(ctx, { signals: evaluation.signals, activityType: activity.type, hintsUsed: state.hints_used, correctness: evaluation.correctness });
   if (xp?.type === "xp") {
     state.xp_earned += xp.gained;
     yield xp;

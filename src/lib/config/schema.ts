@@ -14,6 +14,26 @@ export const activityTypes = [
 ] as const;
 export type ActivityType = (typeof activityTypes)[number];
 
+/**
+ * Steps the planner places itself, switched on and off as mechanics rather than listed with the
+ * activity types, so saved configs that list activity types keep working unchanged.
+ * capstone: one case that needs two or more topics at once. crossroads: a decision whose outcome
+ * carries into the next step.
+ */
+export const specialSteps = ["capstone", "crossroads"] as const;
+export type SpecialStep = (typeof specialSteps)[number];
+export type PlanStepType = ActivityType | SpecialStep;
+
+/** How a journey goes through its topics. The learner picks one when building a journey. */
+export const learningRoutes = ["narrative", "scenarios", "quick_scan", "focus"] as const;
+export type LearningRoute = (typeof learningRoutes)[number];
+export const routeInfo: Record<LearningRoute, { label: string; description: string }> = {
+  narrative: { label: "Narrative", description: "Ideas arrive inside one continuing story, starting with the storyboard." },
+  scenarios: { label: "Scenarios", description: "Situations to act in, where your decisions carry consequences." },
+  quick_scan: { label: "Quick scan", description: "A fast pass over every topic, one light check each." },
+  focus: { label: "Focus", description: "One topic at a time, with worked examples and a teach-back." },
+};
+
 export const evidenceSignals = [
   "correct",
   "partial",
@@ -61,6 +81,9 @@ export const appConfigSchema = z.object({
       .array(z.string().transform(normaliseDomain).pipe(z.string().regex(/^([a-z0-9-]+\.)+[a-z]{2,}$/, "Enter a domain like example.com")))
       .max(50)
       .default([...defaultUrlDomains]),
+    // A long source is grouped into at most this many topics. Learners can pick their own limit up to topics_max.
+    topics_default: z.number().int().min(3).max(40).default(12),
+    topics_max: z.number().int().min(3).max(40).default(30),
   }),
   learner: z.object({
     default_level: z.number().int().min(1).max(5).default(2),
@@ -97,6 +120,13 @@ export const appConfigSchema = z.object({
     }),
     streak_grace_days: z.number().int().min(0).max(7).default(1),
     leaderboard: z.boolean().default(false),
+    // Illustrated preview of a journey, played before the first mission.
+    storyboard: z.boolean().default(true),
+    storyboard_panels: z.number().int().min(3).max(8).default(6),
+    // A closing mission whose case needs two or more topics at once.
+    capstone: z.boolean().default(true),
+    // One decision per mission whose outcome carries into the next step.
+    crossroads: z.boolean().default(true),
   }),
   mastery: z.object({
     unlock_threshold: z.number().min(0.3).max(0.95).default(0.6),

@@ -31,7 +31,7 @@ export async function GET(request: Request, context: RouteContext) {
   const ownerFilter = auth.user.role === "admin" ? "" : `&owner_id=eq.${encodeURIComponent(auth.user.id)}`;
   try {
     const contents = await supabaseRequest<Content[]>(
-      `contents?id=eq.${contentId}${ownerFilter}&select=id,owner_id,title,source_type,status,language,chunk_count`,
+      `contents?id=eq.${contentId}${ownerFilter}&select=id,owner_id,title,source_type,status,language,chunk_count,topic_cap`,
     );
     const content = contents?.[0];
     if (!content) return NextResponse.json({ error: "Content not found" }, { status: 404 });
@@ -40,8 +40,8 @@ export async function GET(request: Request, context: RouteContext) {
       supabaseRequest<Array<{ id: string; idx: number; text: string; tokens: number | null }>>(
         `chunks?content_id=eq.${contentId}&select=id,idx,text,tokens&order=idx.asc`,
       ),
-      supabaseRequest<Array<{ id: string; name: string; summary: string; difficulty: number; source_chunk_ids: string[] }>>(
-        `concepts?content_id=eq.${contentId}&select=id,name,summary,difficulty,source_chunk_ids&order=created_at.asc`,
+      supabaseRequest<Array<{ id: string; name: string; summary: string; difficulty: number; source_chunk_ids: string[]; key_points: Array<{ name: string; summary: string }> }>>(
+        `concepts?content_id=eq.${contentId}&retired_at=is.null&select=id,name,summary,difficulty,source_chunk_ids,key_points&order=created_at.asc`,
       ),
       getJobForContent(contentId),
     ]);

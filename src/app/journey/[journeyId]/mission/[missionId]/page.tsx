@@ -6,14 +6,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ActivityCard, Sources, type Submit } from "@/components/activity-card";
 import { AppShell } from "@/components/app-shell";
-import { FeedbackBadge, LessonCard, LevelBar, ListenButton, Stars, StepTrail } from "@/components/learning-visuals";
+import { TuningPanel } from "@/components/tuning-panel";
+import { FeedbackBadge, LessonCard, LevelBar, ListenButton, RateReply, Stars, StepTrail } from "@/components/learning-visuals";
 import { Button, Meter, cx } from "@/components/ui";
 import { personaLabels, personas } from "@/lib/config/schema";
 import { playerLevel } from "@/lib/gamification/rewards";
-import type { MissionSummary, TurnEvent } from "@/lib/tutor/engine";
+import type { MissionSummary, TuningState, TurnEvent } from "@/lib/tutor/engine";
 import { streamTurn } from "@/lib/tutor/client";
 import type { HistoryItem, Position } from "@/lib/tutor/session";
 import type { ClientActivity } from "@/lib/tutor/types";
+import { parseVoiceCommand, shapeOf, spokenStep } from "@/lib/voice/commands";
+import { useHandsFree } from "@/lib/voice/use-hands-free";
 import { useVoice } from "@/lib/voice/use-voice";
 
 type Item =
@@ -23,7 +26,7 @@ type Item =
   | { kind: "xp"; id: string; gained: number; total: number; streak: number; badges: Array<{ id: string; name: string; description: string }> }
   | { kind: "error"; id: string; text: string };
 
-type LearnerState = { difficulty: number; pace: string; modality: string; language: "en" | "roman_ur"; persona: string; text_only: boolean };
+type LearnerState = TuningState;
 
 const personaOptions = personas.map((id) => ({ id, label: personaLabels[id] }));
 
@@ -42,10 +45,26 @@ function Mission() {
   const [summary, setSummary] = useState<MissionSummary | null>(null);
   const [readAloud, setReadAloud] = useState(false);
   const [stats, setStats] = useState<{ total: number; streak: number } | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const shownAt = useRef(0);
   const bottom = useRef<HTMLDivElement>(null);
   const started = useRef(false);
-  const voice = useVoice(state?.language ?? "en", setDraft);
+  const onFinalRef = useRef<(text: string) => void>(() => undefined);
+  const heardFinal = useCallback((text: string) => onFinalRef.current(text), []);
+  const voice = useVoice(state?.language ?? "en", setDraft, heardFinal);
+  const handsFree = useHandsFree(voice);
+  const handsFreeOn = handsFree.on;
+  const language = state?.language ?? "en";
+  const { say, turnStarted, turnEnded } = handsFree;
+
+  /** Reads a tutor message aloud: queued in hands-free mode, or at once when read aloud is on. */
+  const speakOut = useCallback(
+    (text: string) => {
+      if (handsFreeOn) say(text);
+      else if (readAloud) voice.speak(text);
+    },
+    [handsFreeOn, say, readAloud, voice],
+  );
 
   const push = useCallback((item: Item) => setItems((list) => [...list, item]), []);
 
@@ -68,23 +87,24 @@ function Mission() {
           );
           shownAt.current = Date.now();
           setStatus(null);
-          if (readAloud) voice.speak(`${event.activity.title}. ${event.activity.display_text} ${event.activity.type === "lesson" ? "" : event.activity.prompt}`);
+          if (handsFreeOn) say(spokenStep(event.activity, language));
+          else if (readAloud) voice.speak(`${event.activity.title}. ${event.activity.display_text} ${event.activity.type === "lesson" ? "" : event.activity.prompt}`);
           break;
         case "feedback":
           push({ kind: "feedback", id: nextId(), text: event.text, correctness: event.correctness, sources: event.sources, follow_up: event.follow_up });
-          if (readAloud) voice.speak(event.follow_up ? `${event.text} ${event.follow_up}` : event.text);
+          speakOut(event.follow_up ? `${event.text} ${event.follow_up}` : event.text);
           break;
         case "character":
           push({ kind: "character", id: nextId(), text: event.text, name: event.name });
-          if (readAloud) voice.speak(event.text);
+          speakOut(event.text);
           break;
         case "hint":
           push({ kind: "hint", id: nextId(), text: event.text });
-          if (readAloud) voice.speak(event.text);
+          speakOut(event.text);
           break;
         case "answer":
           push({ kind: "answer", id: nextId(), text: event.text, sources: event.sources, abstained: event.abstained });
-          if (readAloud) voice.speak(event.text);
+          speakOut(event.text);
           break;
         case "adaptation":
           setState(event.state);
@@ -99,6 +119,7 @@ function Mission() {
           break;
         case "mission_complete":
           setSummary(event.summary);
+          speakOut(language === "roman_ur" ? `Mission mukammal. Mastery ${Math.round(event.summary.mastery * 100)} percent.` : `Mission complete. Mastery ${Math.round(event.summary.mastery * 100)} percent.`);
           setCurrent(null);
           setStatus(null);
           break;
@@ -111,20 +132,22 @@ function Mission() {
           break;
       }
     },
-    [push, readAloud, voice],
+    [push, readAloud, voice, handsFreeOn, say, speakOut, language],
   );
 
   const send = useCallback(
     async (body: Omit<Parameters<typeof streamTurn>[0], "mission_id">) => {
       setBusy(true);
+      turnStarted();
       try {
         await streamTurn({ mission_id: params.missionId, ...body }, onEvent);
       } finally {
         setBusy(false);
         setStatus(null);
+        turnEnded();
       }
     },
-    [onEvent, params.missionId],
+    [onEvent, params.missionId, turnStarted, turnEnded],
   );
 
   useEffect(() => {
@@ -170,6 +193,60 @@ function Mission() {
   const canSpeak = !textOnly && voice.ttsSupported;
   const listen = canSpeak ? (text: string) => void voice.speak(text) : undefined;
 
+  // Hands-free: what the learner says is matched to the step on screen and acted on.
+  useEffect(() => {
+    onFinalRef.current = (text: string) => {
+      const words = handsFree.heard(text);
+      if (words === null) return;
+      const step = current?.activity;
+      if (!step || summary) {
+        handsFree.enable(false);
+        return;
+      }
+      if (busy) return;
+      const list = step.options ?? step.steps ?? [];
+      const command = parseVoiceCommand(words, shapeOf(step), list.length);
+      switch (command.action) {
+        case "stop":
+          handsFree.enable(false);
+          break;
+        case "repeat":
+          handsFree.repeat();
+          break;
+        case "hint":
+          void send({ action: "hint" });
+          break;
+        case "continue":
+          void send({ action: "continue" });
+          break;
+        case "choose":
+          submit({ choice_id: list[command.index].id });
+          break;
+        case "confidence":
+          submit({ confidence: command.value, reply: "" });
+          break;
+        case "reply":
+          submit({ reply: command.text });
+          break;
+        default:
+          handsFree.say(
+            language === "roman_ur"
+              ? "Maaf kijiye, samajh nahi aaya. Aage, hint, dobara, ya apna jawab boliye."
+              : "Sorry, I did not catch that. Say next, hint, repeat, or your answer.",
+          );
+      }
+    };
+  });
+
+  const toggleHandsFree = (on: boolean) => {
+    if (on) setReadAloud(false);
+    const intro =
+      language === "roman_ur"
+        ? "Hands-free on hai. Main har qadam parh kar sunaungi, phir aapki baat sunungi. Rukne ke liye kahiye: bas."
+        : "Hands-free is on. I will read each step, then listen. Say stop to end it.";
+    handsFree.enable(on, on ? `${intro} ${current && !summary ? spokenStep(current.activity, language) : ""}` : undefined);
+  };
+
   const toggleReadAloud = (on: boolean) => {
     setReadAloud(on);
     // Speaking inside the tap unlocks speech on mobile browsers for the replies that follow.
@@ -204,8 +281,74 @@ function Mission() {
   const readAloudToggle = (
     <label className="flex items-center justify-between gap-3 text-sm">
       <span>🔊 Read replies aloud</span>
-      <input type="checkbox" className="h-5 w-5 accent-[var(--accent)]" checked={readAloud && canSpeak} disabled={!canSpeak} onChange={(event) => toggleReadAloud(event.target.checked)} />
+      <input type="checkbox" className="h-5 w-5 accent-[var(--accent)]" checked={readAloud && canSpeak} disabled={!canSpeak || handsFree.on} onChange={(event) => toggleReadAloud(event.target.checked)} />
     </label>
+  );
+
+  const canHandsFree = canSpeak && voice.autoStopSupported;
+  const handsFreeToggle = (
+    <div className="space-y-1">
+      <label className="flex items-center justify-between gap-3 text-sm">
+        <span>
+          🎧 Hands-free <span className="text-xs text-ink/55">listen, answer, repeat</span>
+        </span>
+        <input type="checkbox" className="h-5 w-5 accent-[var(--accent)]" checked={handsFree.on} disabled={!canHandsFree} onChange={(event) => toggleHandsFree(event.target.checked)} />
+      </label>
+      {handsFree.on ? (
+        <p className="text-xs leading-5 text-ink/60" role="status">
+          {voice.listening ? "● Listening now." : voice.speaking ? "Reading aloud..." : "Waiting."} Say next, hint, repeat, an option letter, or your answer. Say stop to end.
+        </p>
+      ) : null}
+      {handsFree.paused ? <p className="text-xs text-ink/60" role="status">{handsFree.paused}</p> : null}
+      {!canHandsFree && canSpeak ? <p className="text-xs text-ink/55">Hands-free needs Chrome or Edge speech recognition. Everything else works here.</p> : null}
+    </div>
+  );
+
+  const settingsBody = (
+    <>
+      <div className="space-y-3">
+        <TuningPanel state={state} focus={summary ? null : current?.activity.concept_name.split(" + ").join(", ")} />
+        {current && !summary && current.activity.type !== "lesson" ? (
+          <Button variant="secondary" className="w-full" disabled={busy} onClick={() => void send({ action: "hint" })}>
+            I would like a hint
+          </Button>
+        ) : null}
+      </div>
+
+      <fieldset className="border border-ink/15 bg-panel p-4" disabled={busy}>
+        <legend className="px-1 text-xs font-semibold uppercase tracking-[0.14em] text-ink/60">Language</legend>
+        <div className="mt-2">{languageButtons}</div>
+      </fieldset>
+
+      <fieldset className="border border-ink/15 bg-panel p-4" disabled={busy}>
+        <legend className="px-1 text-xs font-semibold uppercase tracking-[0.14em] text-ink/60">Learner type</legend>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          {personaOptions.map((persona) => (
+            <button
+              key={persona.id}
+              type="button"
+              aria-pressed={state?.persona === persona.id}
+              onClick={() => void send({ action: "set_persona", persona: persona.id })}
+              className={cx("min-h-11 border px-2 text-xs font-semibold", state?.persona === persona.id ? "border-accent bg-accent text-paper" : "border-ink/25 bg-paper")}
+            >
+              {persona.label}
+            </button>
+          ))}
+        </div>
+      </fieldset>
+
+      <fieldset className="space-y-3 border border-ink/15 bg-panel p-4 text-sm">
+        <legend className="px-1 text-xs font-semibold uppercase tracking-[0.14em] text-ink/60">Access</legend>
+        <label className="flex items-center justify-between gap-3">
+          Text only mode
+          <input type="checkbox" className="h-5 w-5 accent-[var(--accent)]" checked={textOnly} disabled={busy} onChange={(event) => void send({ action: "set_text_only", text_only: event.target.checked })} />
+        </label>
+        {readAloudToggle}
+        {handsFreeToggle}
+        {!voice.ttsSupported ? <p className="text-xs text-ink/55">This browser cannot read aloud. Text works fully.</p> : null}
+        {readAloud && state?.language === "roman_ur" && voice.hasVoices ? <p className="text-xs text-ink/55">Roman Urdu is read by an English voice, captions stay on.</p> : null}
+      </fieldset>
+    </>
   );
 
   const level = stats ? playerLevel(stats.total) : null;
@@ -220,13 +363,6 @@ function Mission() {
           {level && stats ? <LevelBar level={level.level} into={level.into} span={level.span} streak={stats.streak} /> : null}
         </div>
         {current?.position.steps && !summary ? <StepTrail steps={current.position.steps} index={current.position.index} /> : null}
-
-        {/* On phones the settings column sits below the conversation, so the essentials live here. */}
-        <div className="space-y-3 border border-ink/15 bg-panel p-3 lg:hidden">
-          {languageButtons}
-          {readAloudToggle}
-          {!voice.ttsSupported ? <p className="text-xs text-ink/55">This browser cannot read aloud. Text works fully.</p> : null}
-        </div>
 
         <div aria-live="polite" className="space-y-4">
           {items.map((item) => {
@@ -270,6 +406,7 @@ function Mission() {
                     <p className="mt-2 leading-7">{item.text}</p>
                     {item.follow_up ? <p className="mt-2 font-semibold">{item.follow_up}</p> : null}
                     <Sources sources={item.sources} />
+                    <RateReply missionId={params.missionId} kind="feedback" />
                   </div>
                 );
               case "character":
@@ -280,6 +417,7 @@ function Mission() {
                       <ListenButton text={item.text} onListen={listen} />
                     </div>
                     <p className="mt-1 leading-7">{item.text}</p>
+                    <RateReply missionId={params.missionId} kind="character" />
                   </div>
                 );
               case "hint":
@@ -297,6 +435,7 @@ function Mission() {
                     </div>
                     <p className="mt-1 leading-7">{item.text}</p>
                     <Sources sources={item.sources} />
+                    <RateReply missionId={params.missionId} kind="answer" />
                   </div>
                 );
               case "reasons":
@@ -410,61 +549,42 @@ function Mission() {
         <div ref={bottom} />
       </section>
 
-      <aside className="space-y-5 lg:sticky lg:top-6 lg:self-start" aria-label="Learning settings">
-        <div className="border border-ink/15 bg-panel p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/60">Right now</p>
-          {state ? (
-            <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">
-              <dt className="text-ink/60">Level</dt>
-              <dd className="font-semibold">{state.difficulty} / 5</dd>
-              <dt className="text-ink/60">Pace</dt>
-              <dd className="font-semibold capitalize">{state.pace}</dd>
-              <dt className="text-ink/60">Style</dt>
-              <dd className="font-semibold">{state.modality === "choices" ? "Guided choices" : "Open questions"}</dd>
-            </dl>
-          ) : (
-            <p className="mt-2 text-sm text-ink/60">Loading...</p>
-          )}
+      <aside className="hidden space-y-5 lg:sticky lg:top-24 lg:block lg:self-start" aria-label="Learning settings">
+        {settingsBody}
+      </aside>
+
+      {/* Phones: the mission comes first. One bar at the bottom holds the quick actions and opens the settings as a sheet. */}
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-ink/15 bg-paper/95 backdrop-blur lg:hidden">
+        <div className="flex items-center gap-2 py-2 pl-4 pr-20">
           {current && !summary && current.activity.type !== "lesson" ? (
-            <Button variant="secondary" className="mt-4 w-full" disabled={busy} onClick={() => void send({ action: "hint" })}>
-              I would like a hint
+            <Button variant="secondary" className="px-3" disabled={busy} onClick={() => void send({ action: "hint" })}>
+              💡 Hint
             </Button>
           ) : null}
+          {canHandsFree ? (
+            <Button variant={handsFree.on ? "primary" : "secondary"} className="px-3" aria-pressed={handsFree.on} onClick={() => toggleHandsFree(!handsFree.on)}>
+              🎧 {handsFree.on ? (voice.listening ? "Listening" : "On") : "Hands-free"}
+            </Button>
+          ) : null}
+          <Button variant="secondary" className="ml-auto px-3" aria-haspopup="dialog" aria-expanded={sheetOpen} onClick={() => setSheetOpen(true)}>
+            ⚙ Tuning{state ? ` · L${state.difficulty}` : ""}
+          </Button>
         </div>
-
-        <fieldset className="hidden border border-ink/15 bg-panel p-4 lg:block" disabled={busy}>
-          <legend className="px-1 text-xs font-semibold uppercase tracking-[0.14em] text-ink/60">Language</legend>
-          <div className="mt-2">{languageButtons}</div>
-        </fieldset>
-
-        <fieldset className="border border-ink/15 bg-panel p-4" disabled={busy}>
-          <legend className="px-1 text-xs font-semibold uppercase tracking-[0.14em] text-ink/60">Learner type</legend>
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            {personaOptions.map((persona) => (
-              <button
-                key={persona.id}
-                type="button"
-                aria-pressed={state?.persona === persona.id}
-                onClick={() => void send({ action: "set_persona", persona: persona.id })}
-                className={cx("min-h-11 border px-2 text-xs font-semibold", state?.persona === persona.id ? "border-accent bg-accent text-paper" : "border-ink/25 bg-paper")}
-              >
-                {persona.label}
+      </div>
+      {sheetOpen ? (
+        <div role="dialog" aria-modal="true" aria-label="Tuning and settings" className="fixed inset-0 z-50 lg:hidden" onKeyDown={(event) => event.key === "Escape" && setSheetOpen(false)}>
+          <button type="button" aria-label="Close settings" className="absolute inset-0 h-full w-full bg-ink/40" onClick={() => setSheetOpen(false)} />
+          <div className="animate-rise absolute inset-x-0 bottom-0 max-h-[85vh] space-y-4 overflow-y-auto border-t border-ink/20 bg-paper p-4 pb-8">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold">Tuning and settings</p>
+              <button type="button" autoFocus onClick={() => setSheetOpen(false)} className="min-h-11 px-3 text-sm font-semibold text-accent">
+                Done
               </button>
-            ))}
+            </div>
+            {settingsBody}
           </div>
-        </fieldset>
-
-        <fieldset className="space-y-3 border border-ink/15 bg-panel p-4 text-sm">
-          <legend className="px-1 text-xs font-semibold uppercase tracking-[0.14em] text-ink/60">Access</legend>
-          <label className="flex items-center justify-between gap-3">
-            Text only mode
-            <input type="checkbox" className="h-5 w-5 accent-[var(--accent)]" checked={textOnly} disabled={busy} onChange={(event) => void send({ action: "set_text_only", text_only: event.target.checked })} />
-          </label>
-          <div className="hidden lg:block">{readAloudToggle}</div>
-          {!voice.ttsSupported ? <p className="hidden text-xs text-ink/55 lg:block">This browser cannot read aloud. Text works fully.</p> : null}
-          {readAloud && state?.language === "roman_ur" && voice.hasVoices ? <p className="text-xs text-ink/55">Roman Urdu is read by an English voice, captions stay on.</p> : null}
-        </fieldset>
-      </aside>
+        </div>
+      ) : null}
     </div>
   );
 }

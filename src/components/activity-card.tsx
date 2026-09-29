@@ -17,6 +17,8 @@ const typeLabels: Record<string, string> = {
   teach_back: "Teach a friend",
   spaced_recall: "Quick flashback",
   reflection: "Check in",
+  capstone: "Capstone case",
+  crossroads: "Crossroads",
 };
 
 const groundingLabels: Record<ClientActivity["grounded"], string> = {
@@ -77,7 +79,7 @@ export function ActivityCard({
     });
   };
 
-  const openAnswer = ["explain_ask", "teach_back", "spaced_recall", "roleplay"].includes(activity.type);
+  const openAnswer = ["explain_ask", "teach_back", "spaced_recall", "roleplay", "capstone"].includes(activity.type);
 
   return (
     <article className="animate-rise border border-ink/20 bg-panel p-5 sm:p-6" aria-labelledby={`activity-${activity.id}`}>
@@ -105,10 +107,20 @@ export function ActivityCard({
           <strong>{activity.roleplay.character}</strong>: {activity.roleplay.situation}
         </p>
       ) : null}
+      {activity.type === "crossroads" ? (
+        <p className="mt-3 inline-flex items-center gap-2 border border-accent/40 bg-paper px-3 py-1.5 text-xs font-semibold text-accent">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0"><path d="M6 3v6a4 4 0 0 0 4 4h4a4 4 0 0 1 4 4v4M18 3v4M6 21v-8" /></svg> Your path shapes what happens next. There is no going back at a crossroads.
+        </p>
+      ) : null}
+      {activity.type === "capstone" ? (
+        <p className="mt-3 border border-ink/20 bg-paper px-3 py-2 text-xs leading-5">
+          <strong className="text-accent">Brings together:</strong> {activity.concept_name.split(" + ").join(", ")}. Use all of them in your answer.
+        </p>
+      ) : null}
       <p className="mt-4 font-semibold">{activity.prompt}</p>
 
-      {activity.type === "scenario" && activity.options && (
-        <div className="mt-4 grid gap-2" role="group" aria-label="Choose an option">
+      {(activity.type === "scenario" || activity.type === "crossroads") && activity.options && (
+        <div className="mt-4 grid gap-2" role="group" aria-label={activity.type === "crossroads" ? "Choose a path" : "Choose an option"}>
           {activity.options.map((option, index) => (
             <button
               key={option.id}

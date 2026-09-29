@@ -20,6 +20,8 @@ export const badgeCatalog: Record<string, { name: string; description: string }>
   steady: { name: "Steady Hand", description: "Learned on 3 days in a row." },
   mastery_3: { name: "Solid Ground", description: "Mastered 3 concepts." },
   honest_check: { name: "Honest Check", description: "Your confidence matched your answers." },
+  capstone_cleared: { name: "Capstone Cleared", description: "Solved a capstone case without a hint." },
+  pathfinder: { name: "Pathfinder", description: "Took the path your material recommends at a crossroads." },
 };
 
 /** XP for meaningful actions only, from the config table. No XP for clicks or hints. */
@@ -55,6 +57,8 @@ export type RewardEvent = {
   activityType?: string;
   missionCompleted?: boolean;
   masteredCount?: number;
+  hintsUsed?: number;
+  correctness?: number;
 };
 
 export function applyRewards(row: GamificationRow, event: RewardEvent, config: AppConfig, now = new Date()) {
@@ -69,6 +73,8 @@ export function applyRewards(row: GamificationRow, event: RewardEvent, config: A
   if (has("teach_back")) bump("teach_backs");
   if (event.activityType === "roleplay" && (has("correct") || has("transfer"))) bump("roleplays");
   if (has("calibrated")) bump("calibrated");
+  if (event.activityType === "capstone" && (event.correctness ?? 0) >= 0.8 && !event.hintsUsed) bump("capstones");
+  if (event.activityType === "crossroads" && has("correct")) bump("crossroads");
   if (event.masteredCount !== undefined) stats.mastered = Math.max(stats.mastered ?? 0, event.masteredCount);
 
   const earned = new Set(row.badges);
@@ -81,6 +87,8 @@ export function applyRewards(row: GamificationRow, event: RewardEvent, config: A
     ["steady", streak >= 3],
     ["mastery_3", (stats.mastered ?? 0) >= 3],
     ["honest_check", (stats.calibrated ?? 0) >= 1],
+    ["capstone_cleared", (stats.capstones ?? 0) >= 1],
+    ["pathfinder", (stats.crossroads ?? 0) >= 1],
   ];
   const newBadges = rules.filter(([id, ok]) => ok && !earned.has(id)).map(([id]) => id);
   return {

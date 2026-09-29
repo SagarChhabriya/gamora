@@ -17,7 +17,7 @@ export async function GET(request: Request, context: RouteContext) {
   const { journeyId } = await context.params;
   if (!z.string().uuid().safeParse(journeyId).success) return NextResponse.json({ error: "Invalid journey" }, { status: 400 });
 
-  const journeys = await supabaseRequest<Array<{ id: string; learner_id: string; title: string | null; content_id: string; language: string; persona: string | null; plan: { story_theme?: string; planner?: string } }>>(
+  const journeys = await supabaseRequest<Array<{ id: string; learner_id: string; title: string | null; content_id: string; language: string; persona: string | null; plan: { story_theme?: string; planner?: string; route?: string; storyboard?: { panels?: unknown[] } } }>>(
     `journeys?id=eq.${journeyId}&select=id,learner_id,title,content_id,language,persona,plan`,
   );
   const journey = journeys?.[0];
@@ -32,7 +32,7 @@ export async function GET(request: Request, context: RouteContext) {
   ]);
   const game = gamification?.[0] ?? { xp: 0, streak: 0, best_streak: 0, badges: [] };
   return NextResponse.json({
-    journey: { id: journey.id, title: journey.title, story_theme: journey.plan?.story_theme ?? "", planner: journey.plan?.planner, language: journey.language, persona: journey.persona },
+    journey: { id: journey.id, title: journey.title, story_theme: journey.plan?.story_theme ?? "", planner: journey.plan?.planner, route: journey.plan?.route ?? "narrative", language: journey.language, persona: journey.persona },
     missions,
     learner: {
       persona: profiles?.[0]?.persona ?? config.learner.default_persona,
@@ -45,5 +45,6 @@ export async function GET(request: Request, context: RouteContext) {
     thresholds: { unlock: config.mastery.unlock_threshold, mastered: config.mastery.mastered_threshold },
     ui: { celebrations: config.ui.celebrations, text_only_default: config.ui.text_only_default, high_contrast_default: config.ui.high_contrast_default },
     languages: config.language.allowed,
+    storyboard: { enabled: config.mechanics.storyboard, ready: Boolean(journey.plan?.storyboard?.panels?.length), panels: journey.plan?.storyboard?.panels?.length ?? config.mechanics.storyboard_panels },
   });
 }

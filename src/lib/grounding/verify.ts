@@ -7,6 +7,7 @@ import { languageRule, learnerText, tutorSystemPrompt } from "@/lib/tutor/prompt
 import { refsToIds, sourceBlock } from "@/lib/tutor/retrieval";
 import { fallbackActivity, generateActivity } from "@/lib/tutor/activity";
 import type { Activity, Language, Pace, SourceChunk } from "@/lib/tutor/types";
+import { visualClaims } from "@/lib/visuals/views";
 
 const verdictItem = z.object({
   claim_id: z.coerce.string(),
@@ -34,8 +35,10 @@ export function claimsFromActivity(activity: Activity) {
     ...(activity.items ?? []).length ? [`Correct order: ${(activity.items ?? []).map((item) => item.text).join(" then ")}`] : [],
     ...(activity.lesson?.flow.length ? [`In order: ${activity.lesson.flow.join(" then ")}`] : []),
     ...(activity.lesson?.example ? [activity.lesson.example] : []),
+    // The extra diagram views state facts too, so they are checked with the rest of the lesson.
+    ...visualClaims(activity.lesson?.visual),
   ];
-  return claims.filter((claim) => claim && claim.trim().length > 12).slice(0, 8);
+  return claims.filter((claim) => claim && claim.trim().length > 12).slice(0, 10);
 }
 
 /** B5: grounding verifier. Strict mode fails on any unsupported claim, lenient mode only on several. */

@@ -1,8 +1,10 @@
 "use client";
 
-import { Fragment } from "react";
+import { useState } from "react";
 
+import { LessonViews } from "@/components/diagrams";
 import { Button, cx } from "@/components/ui";
+import { authFetch } from "@/lib/auth/client";
 import type { ClientActivity } from "@/lib/tutor/types";
 
 /** Tap-to-listen. A tap is a user gesture, which mobile browsers require before speech plays. */
@@ -24,48 +26,10 @@ export function ListenButton({ text, onListen, className }: { text: string; onLi
   );
 }
 
-function StickyNotes({ notes }: { notes: string[] }) {
-  return (
-    <ul className="grid gap-3 sm:grid-cols-2" aria-label="Key notes">
-      {notes.map((note, index) => (
-        <li
-          key={note}
-          className={cx(
-            "sticky-note min-h-20 p-4 text-sm font-medium leading-6 shadow-[2px_3px_0_rgb(23_59_54/0.12)]",
-            `sticky-note-${(index % 4) + 1}`,
-            index % 2 ? "sm:rotate-[0.8deg]" : "sm:-rotate-[0.8deg]",
-          )}
-        >
-          {note}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function FlowDiagram({ steps }: { steps: string[] }) {
-  return (
-    <ol className="flex flex-col items-stretch gap-1 sm:flex-row sm:items-center" aria-label="How it flows, in order">
-      {steps.map((step, index) => (
-        <Fragment key={step}>
-          <li className="flex flex-1 items-center gap-2 border border-ink/25 bg-paper px-3 py-2.5 text-sm font-medium">
-            <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-ink text-[11px] font-semibold text-paper">{index + 1}</span>
-            {step}
-          </li>
-          {index < steps.length - 1 ? (
-            <li aria-hidden="true" className="flex justify-center text-accent">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="rotate-90 sm:rotate-0">
-                <path d="M4 12h15M13 6l6 6-6 6" />
-              </svg>
-            </li>
-          ) : null}
-        </Fragment>
-      ))}
-    </ol>
-  );
-}
-
-/** Learn first: key idea, sticky notes, a flow diagram when the source has a process, and an example. */
+/**
+ * Learn first: key idea, then the lesson drawn in the view that fits it best (notes, flow or one of
+ * the diagram views), with a switcher for every other view its data supports, then an example.
+ */
 export function LessonCard({
   activity,
   active,
@@ -92,13 +56,7 @@ export function LessonCard({
           <p className="mt-1 text-lg font-semibold leading-7">{lesson?.key_idea ?? activity.display_text}</p>
         </div>
       </div>
-      {lesson?.notes.length ? <StickyNotes notes={lesson.notes} /> : null}
-      {lesson?.flow.length ? (
-        <div>
-          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-ink/60">How it flows</p>
-          <FlowDiagram steps={lesson.flow} />
-        </div>
-      ) : null}
+      {lesson ? <LessonViews source={lesson} /> : null}
       {lesson?.example ? (
         <div className="border border-dashed border-ink/35 p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/60">Example</p>
@@ -201,5 +159,30 @@ export function Stars({ count }: { count: number }) {
         </span>
       ))}
     </p>
+  );
+}
+
+/** Was this reply useful? One tap, sent once. Only the verdict is recorded, never the reply text. */
+export function RateReply({ missionId, kind }: { missionId: string; kind: "feedback" | "answer" | "character" | "hint" }) {
+  const [rated, setRated] = useState<boolean | null>(null);
+  async function rate(useful: boolean) {
+    setRated(useful);
+    await authFetch("/api/tutor/rate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mission_id: missionId, kind, useful }),
+    }).catch(() => undefined);
+  }
+  if (rated !== null) return <p className="mt-2 text-xs text-ink/55">{rated ? "Thanks, noted as useful." : "Thanks. That helps us improve."}</p>;
+  return (
+    <div className="mt-2 flex items-center gap-1.5 text-xs text-ink/60" role="group" aria-label="Was this reply useful?">
+      <span>Useful?</span>
+      <button type="button" onClick={() => void rate(true)} className="min-h-8 min-w-8 border border-ink/20 bg-paper px-2 hover:border-good hover:text-good" aria-label="Yes, useful">
+        👍
+      </button>
+      <button type="button" onClick={() => void rate(false)} className="min-h-8 min-w-8 border border-ink/20 bg-paper px-2 hover:border-accent hover:text-accent" aria-label="Not useful">
+        👎
+      </button>
+    </div>
   );
 }

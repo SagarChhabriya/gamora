@@ -63,6 +63,18 @@ const groups: Array<{ title: string; description: string; fields: Field[] }> = [
       { path: "mechanics.xp.mission_complete", label: "XP for a mission", kind: "number", min: 0, max: 500 },
       { path: "mechanics.streak_grace_days", label: "Streak grace days", kind: "number", min: 0, max: 7 },
       { path: "mechanics.leaderboard", label: "Leaderboard (off by default, no pressure)", kind: "toggle" },
+      { path: "mechanics.storyboard", label: "Storyboard before the first mission", kind: "toggle" },
+      { path: "mechanics.storyboard_panels", label: "Storyboard panels", kind: "number", min: 3, max: 8 },
+      { path: "mechanics.capstone", label: "Capstone case at the end of a journey", kind: "toggle", hint: "One case that needs two or more topics at once." },
+      { path: "mechanics.crossroads", label: "Crossroads decisions", kind: "toggle", hint: "At most one per mission. The choice carries into the next step." },
+    ],
+  },
+  {
+    title: "Sources",
+    description: "How long material is broken into topics.",
+    fields: [
+      { path: "content.topics_default", label: "Topics per source (default)", kind: "number", min: 3, max: 40, hint: "Long sources are grouped into at most this many topics." },
+      { path: "content.topics_max", label: "Highest limit a learner may choose", kind: "number", min: 3, max: 40 },
     ],
   },
   {

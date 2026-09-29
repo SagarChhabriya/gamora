@@ -12,7 +12,8 @@ export function withLessons(queue: Queue): Queue {
   const taught = new Set(queue.filter((item) => item.type === "lesson").map((item) => item.concept_id));
   const result: Queue = [];
   for (const item of queue) {
-    if (item.type !== "lesson" && item.type !== "spaced_recall" && item.type !== "reflection" && !taught.has(item.concept_id)) {
+    // A capstone case draws on topics taught in earlier missions, so it never gets a lesson of its own.
+    if (item.type !== "lesson" && item.type !== "spaced_recall" && item.type !== "reflection" && item.type !== "capstone" && !taught.has(item.concept_id)) {
       taught.add(item.concept_id);
       result.push({ type: "lesson", concept_id: item.concept_id, intent: "teach before any question" });
       result.push({ ...item, intent: afterLessonIntent });
@@ -21,6 +22,21 @@ export function withLessons(queue: Queue): Queue {
     result.push(item);
   }
   return result;
+}
+
+const forkable = new Set(["scenario", "spot_error", "ordering", "roleplay"]);
+
+/**
+ * At most one Crossroads per mission, so choices stay the exception and never feel like a quiz. It
+ * replaces the first practice step that comes after the learner has already answered something,
+ * and it is never the check that directly follows a lesson.
+ */
+export function withCrossroads(queue: Queue): Queue {
+  if (queue.some((item) => item.type === "crossroads")) return queue;
+  const answered = (index: number) => queue.slice(0, index).some((item) => item.type !== "lesson");
+  const at = queue.findIndex((item, index) => forkable.has(item.type) && answered(index) && queue[index - 1]?.type !== "lesson");
+  if (at < 0) return queue;
+  return queue.map((item, index) => (index === at ? { ...item, type: "crossroads" as const, intent: "a fork in the situation; the learner's path shapes what happens next" } : item));
 }
 
 export type StepKind = "lesson" | "question";

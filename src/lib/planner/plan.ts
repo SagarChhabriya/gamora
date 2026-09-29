@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { ActivityType, AppConfig, Persona } from "@/lib/config/schema";
+import type { ActivityType, AppConfig, LearningRoute, Persona, PlanStepType } from "@/lib/config/schema";
 import { repairJson } from "@/lib/llm/json";
 import { generateWithFallback } from "@/lib/llm/router";
 
@@ -13,9 +13,11 @@ export type LearnerProfile = {
   prior?: string;
   time_budget_min: number;
   language: "en" | "roman_ur";
+  /** How the journey goes through its topics. Narrative when not chosen. */
+  route?: LearningRoute;
 };
 
-export type PlannedActivity = { type: ActivityType; concept_id: string; intent: string };
+export type PlannedActivity = { type: PlanStepType; concept_id: string; intent: string; concept_ids?: string[] };
 export type PlannedMission = {
   idx: number;
   title: string;
@@ -24,7 +26,7 @@ export type PlannedMission = {
   activities: PlannedActivity[];
   unlock_rule: { min_mastery: number; after_mission: number | null };
 };
-export type JourneyPlan = { title: string; story_theme: string; missions: PlannedMission[]; planner: "llm" | "fallback" };
+export type JourneyPlan = { title: string; story_theme: string; missions: PlannedMission[]; planner: "llm" | "fallback"; route: LearningRoute };
 
 const planSchema = z.object({
   title: z.string().min(3).max(120),
@@ -69,7 +71,13 @@ export function orderConcepts(concepts: PlannerConcept[], edges: PlannerEdge[]) 
 
 /** Missions the learner has time for, and how many concepts go in each. */
 export function missionBudget(profile: LearnerProfile, conceptCount: number, config: AppConfig) {
-  const perMission = profile.persona === "busy_rm" || profile.persona === "low_bandwidth" ? 2 : profile.persona === "expert" ? 4 : 3;
+  const route = profile.route ?? "narrative";
+  // A quick scan covers every topic, so missions hold more topics and the time budget does not cut any.
+  if (route === "quick_scan") {
+    const perMission = Math.max(4, Math.ceil(conceptCount / 8));
+    return { missions: Math.max(1, Math.min(8, Math.ceil(conceptCount / perMission))), perMission };
+  }
+  const perMission = route === "focus" ? 1 : profile.persona === "busy_rm" || profile.persona === "low_bandwidth" ? 2 : profile.persona === "expert" ? 4 : 3;
   const byTime = Math.max(1, Math.floor(profile.time_budget_min / config.learner.minutes_per_mission));
   const needed = Math.ceil(conceptCount / perMission);
   return { missions: Math.max(1, Math.min(8, byTime, needed)), perMission };
@@ -78,8 +86,35 @@ export function missionBudget(profile: LearnerProfile, conceptCount: number, con
 const openers: ActivityType[] = ["explain_ask", "spot_error", "scenario"];
 
 /** Activity mix for one mission. Starts easy and builds to application, per the planner prompt. */
-export function activitiesFor(conceptIds: string[], enabled: ActivityType[], persona: Persona, missionIdx: number): PlannedActivity[] {
+export function activitiesFor(conceptIds: string[], enabled: ActivityType[], persona: Persona, missionIdx: number, route: LearningRoute = "narrative"): PlannedActivity[] {
   const allow = (type: ActivityType) => enabled.includes(type);
+  const pick = (types: ActivityType[], fallback: ActivityType = "explain_ask") => types.find(allow) ?? fallback;
+  if (route === "quick_scan") {
+    // One light check per topic. The lesson in front of it comes from the session.
+    return conceptIds.map((conceptId) => ({ type: pick(["explain_ask"]), concept_id: conceptId, intent: "one light check that the main idea landed" }));
+  }
+  if (route === "focus") {
+    const plan: PlannedActivity[] = [];
+    for (const conceptId of conceptIds) {
+      plan.push({ type: pick(["explain_ask"]), concept_id: conceptId, intent: "walk through a worked example from the source, then check understanding" });
+      plan.push({ type: pick(["teach_back", "explain_ask"]), concept_id: conceptId, intent: "the learner explains it back in their own words" });
+      plan.push({ type: pick(["spot_error", "scenario", "ordering"]), concept_id: conceptId, intent: "apply it to one concrete case" });
+    }
+    if (missionIdx > 0 && allow("spaced_recall")) plan.splice(1, 0, { type: "spaced_recall", concept_id: conceptIds[0], intent: "recall from an earlier mission" });
+    if (allow("reflection")) plan.push({ type: "reflection", concept_id: conceptIds[conceptIds.length - 1], intent: "confidence check" });
+    return plan;
+  }
+  if (route === "scenarios") {
+    const plan: PlannedActivity[] = [];
+    const rotation: ActivityType[] = ["scenario", "roleplay", "spot_error", "ordering"].filter((type) => allow(type as ActivityType)) as ActivityType[];
+    conceptIds.forEach((conceptId, index) => {
+      plan.push({ type: pick(["scenario", "explain_ask"]), concept_id: conceptId, intent: "a real situation where the learner must decide what to do" });
+      plan.push({ type: rotation[(missionIdx + index + 1) % Math.max(1, rotation.length)] ?? "scenario", concept_id: conceptId, intent: "act in a realistic situation with consequences" });
+    });
+    if (missionIdx > 0 && allow("spaced_recall")) plan.splice(1, 0, { type: "spaced_recall", concept_id: conceptIds[0], intent: "recall from an earlier mission" });
+    if (allow("reflection")) plan.push({ type: "reflection", concept_id: conceptIds[conceptIds.length - 1], intent: "confidence check" });
+    return plan;
+  }
   const plan: PlannedActivity[] = [];
   conceptIds.forEach((conceptId, index) => {
     const first: ActivityType = persona === "expert" ? (allow("scenario") ? "scenario" : "explain_ask") : "explain_ask";
@@ -95,25 +130,73 @@ export function activitiesFor(conceptIds: string[], enabled: ActivityType[], per
   return plan;
 }
 
+/** Topics a capstone case combines: up to three, spread from early to late in the journey. */
+export function capstoneTopics(conceptIds: string[]) {
+  const unique = [...new Set(conceptIds)];
+  if (unique.length < 2) return [];
+  if (unique.length <= 3) return unique;
+  return [unique[0], unique[Math.floor(unique.length / 2)], unique[unique.length - 1]];
+}
+
+/**
+ * Closes a journey with one Capstone case: a situation that needs two or more of its topics at
+ * once. It unlocks after the last mission, like any other. Quick scans stay light and skip it.
+ */
+export function withCapstone(missions: PlannedMission[], profile: LearnerProfile, config: AppConfig, names: Map<string, string>): PlannedMission[] {
+  if (!config.mechanics.capstone || profile.route === "quick_scan") return missions;
+  const topics = capstoneTopics(missions.flatMap((mission) => mission.concept_ids));
+  if (topics.length < 2) return missions;
+  const idx = missions.length;
+  const list = topics.map((id) => names.get(id) ?? "").filter(Boolean);
+  const joined = list.length > 1 ? `${list.slice(0, -1).join(", ")} and ${list.at(-1)}` : list.join("");
+  const ur = profile.language === "roman_ur";
+  return [
+    ...missions,
+    {
+      idx,
+      title: "Capstone case",
+      story_hook: ur
+        ? `Ek case jismein sab kuch saath chahiye: ${joined}. Aap ne jo seekha, ab usay ek saath use karein.`
+        : `One case that needs everything together: ${joined}. Bring what you have learned into a single decision.`,
+      concept_ids: topics,
+      activities: [
+        { type: "capstone", concept_id: topics[0], concept_ids: topics, intent: "one compound case that needs every listed topic" },
+        ...(config.mechanics.enabled_activities.includes("reflection") ? [{ type: "reflection" as const, concept_id: topics[topics.length - 1], intent: "confidence check across the whole journey" }] : []),
+      ],
+      unlock_rule: { min_mastery: config.mastery.unlock_threshold, after_mission: idx - 1 },
+    },
+  ];
+}
+
 export function fallbackPlan(title: string, concepts: PlannerConcept[], edges: PlannerEdge[], profile: LearnerProfile, config: AppConfig): JourneyPlan {
   const ordered = orderConcepts(concepts, edges);
   const { missions, perMission } = missionBudget(profile, ordered.length, config);
   const selected = ordered.slice(0, missions * perMission);
   const groups = Array.from({ length: missions }, (_, index) => selected.slice(index * perMission, (index + 1) * perMission)).filter((group) => group.length);
+  const route = profile.route ?? "narrative";
+  const planned = groups.map((group, idx) => ({
+    idx,
+    title: group[0].name,
+    story_hook: `Today's situation needs ${group.map((concept) => concept.name).join(" and ")}. Let us work through it together.`,
+    concept_ids: group.map((concept) => concept.id),
+    activities: activitiesFor(group.map((concept) => concept.id), config.mechanics.enabled_activities, profile.persona, idx, route),
+    unlock_rule: { min_mastery: config.mastery.unlock_threshold, after_mission: idx === 0 ? null : idx - 1 },
+  }));
   return {
     title,
     story_theme: "A working day where each mission is a real situation you handle with what you learn.",
     planner: "fallback",
-    missions: groups.map((group, idx) => ({
-      idx,
-      title: group[0].name,
-      story_hook: `Today's situation needs ${group.map((concept) => concept.name).join(" and ")}. Let us work through it together.`,
-      concept_ids: group.map((concept) => concept.id),
-      activities: activitiesFor(group.map((concept) => concept.id), config.mechanics.enabled_activities, profile.persona, idx),
-      unlock_rule: { min_mastery: config.mastery.unlock_threshold, after_mission: idx === 0 ? null : idx - 1 },
-    })),
+    route,
+    missions: withCapstone(planned, profile, config, new Map(concepts.map((concept) => [concept.id, concept.name]))),
   };
 }
+
+const routeText: Record<LearningRoute, string> = {
+  narrative: "Route: Narrative. The missions are chapters of one continuing story with the same people and setting. Favour roleplay and scenario once a concept is introduced.",
+  scenarios: "Route: Scenarios. Every mission is a situation to act in. Favour scenario, roleplay and spot_error; decisions should carry consequences.",
+  quick_scan: "Route: Quick scan. A fast overview: one light explain_ask per concept, no reflection, no spaced_recall.",
+  focus: "Route: Focus. One concept per mission, taught with a worked example, then teach_back, then one applied activity.",
+};
 
 const personaText: Record<Persona, string> = {
   new_joiner: "a beginner who is new to this topic, needs clear basics",
@@ -137,6 +220,9 @@ export async function planJourney(input: {
   const { missions, perMission } = missionBudget(profile, ordered.length, config);
   const refs = new Map(ordered.map((concept, index) => [`C${index + 1}`, concept]));
   const enabled = config.mechanics.enabled_activities;
+  const route = profile.route ?? "narrative";
+  // Quick scan and Focus have a fixed shape; the model only names and groups the missions.
+  const fixedShape = route === "quick_scan" || route === "focus";
 
   try {
     const response = await generateWithFallback({
@@ -148,7 +234,7 @@ export async function planJourney(input: {
       purpose: "journey.plan",
       requestId: input.requestId,
       userHash: input.userHash,
-      cacheKey: `plan:v3:${input.configVersion}:${profile.persona}:${profile.time_budget_min}:${profile.language}`,
+      cacheKey: `plan:v4:${input.configVersion}:${profile.persona}:${profile.time_budget_min}:${profile.language}:${route}`,
       messages: [
         {
           role: "system",
@@ -162,6 +248,7 @@ Time budget: ${profile.time_budget_min} minutes. Write titles and hooks in ${pro
 Create exactly ${missions} missions with up to ${perMission} concepts each, following the concept order (earlier concepts are prerequisites).
 The story must come from the material's own subject and setting. Use the learner's role only to decide the point of view, never to change the setting: a biology chapter stays in biology, a cooking guide stays in a kitchen, and a programming tutorial stays with code. Each mission is one realistic situation from that setting.
 Activity types allowed: ${enabled.join(", ")}. Start easy (explain_ask), then build to scenario, spot_error, ordering or roleplay. Vary types. Add one reflection at the end of each mission. From mission 2 on, add one spaced_recall of an earlier concept.
+${routeText[route]}
 Only use concept refs from the list.
 Return {"title":string,"story_theme":string,"missions":[{"title":string,"story_hook":string (2 sentences, second person),"concept_refs":["C1"],"activities":[{"type":string,"concept_ref":"C1","intent":string}]}]}
 <concepts>
@@ -179,20 +266,20 @@ ${ordered.map((concept, index) => `C${index + 1}. ${concept.name} (level ${conce
         .filter((id): id is string => Boolean(id) && !seen.has(id as string));
       if (!conceptIds.length) continue;
       conceptIds.forEach((id) => seen.add(id));
-      const activities = mission.activities
+      const activities: PlannedActivity[] = mission.activities
         .map((activity) => ({
           type: activity.type as ActivityType,
           concept_id: refs.get(activity.concept_ref.trim())?.id ?? "",
           intent: activity.intent,
         }))
-        .filter((activity) => enabled.includes(activity.type) && activity.concept_id);
+        .filter((activity) => enabled.includes(activity.type) && Boolean(activity.concept_id));
       const idx = planned.length;
       // Mastery gates unlocks, so every concept in the mission needs at least two chances to show it.
       const covered = new Map<string, number>();
       for (const activity of activities) covered.set(activity.concept_id, (covered.get(activity.concept_id) ?? 0) + 1);
       const gaps = conceptIds.filter((id) => (covered.get(id) ?? 0) < 2);
-      if (gaps.length) {
-        const extra = activitiesFor(gaps, enabled, profile.persona, idx).filter((activity) => activity.type !== "reflection" && activity.type !== "spaced_recall");
+      if (gaps.length && !fixedShape) {
+        const extra = activitiesFor(gaps, enabled, profile.persona, idx, route).filter((activity) => activity.type !== "reflection" && activity.type !== "spaced_recall");
         const reflectionAt = activities.findIndex((activity) => activity.type === "reflection");
         activities.splice(reflectionAt >= 0 ? reflectionAt : activities.length, 0, ...extra);
       }
@@ -201,12 +288,13 @@ ${ordered.map((concept, index) => `C${index + 1}. ${concept.name} (level ${conce
         title: mission.title,
         story_hook: mission.story_hook,
         concept_ids: conceptIds,
-        activities: activities.length >= 2 ? activities : activitiesFor(conceptIds, enabled, profile.persona, idx),
+        activities: !fixedShape && activities.length >= 2 ? activities : activitiesFor(conceptIds, enabled, profile.persona, idx, route),
         unlock_rule: { min_mastery: config.mastery.unlock_threshold, after_mission: idx === 0 ? null : idx - 1 },
       });
     }
     if (!planned.length) throw new Error("Planner returned no usable missions");
-    return { title: parsed.title, story_theme: parsed.story_theme, missions: planned, planner: "llm" };
+    const names = new Map(concepts.map((concept) => [concept.id, concept.name]));
+    return { title: parsed.title, story_theme: parsed.story_theme, missions: withCapstone(planned, profile, config, names), planner: "llm", route };
   } catch {
     return fallbackPlan(input.title, concepts, edges, profile, config);
   }

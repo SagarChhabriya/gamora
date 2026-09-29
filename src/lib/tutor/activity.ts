@@ -2,12 +2,14 @@ import { randomUUID } from "node:crypto";
 
 import { z } from "zod";
 
-import type { ActivityType, AppConfig, Persona } from "@/lib/config/schema";
+import type { AppConfig, Persona, PlanStepType } from "@/lib/config/schema";
 import { repairJson } from "@/lib/llm/json";
 import { generateWithFallback } from "@/lib/llm/router";
 import { detectLanguage } from "@/lib/ingest/language";
 import { languageRule, tutorSystemPrompt } from "@/lib/tutor/prompts";
 import { refsToIds, sourceBlock } from "@/lib/tutor/retrieval";
+import { parseLessonVisual, visualPromptShape } from "@/lib/visuals/schema";
+import { groundVisual } from "@/lib/visuals/views";
 import type { Activity, ClientActivity, Language, Modality, Pace, SourceChunk, StepType } from "@/lib/tutor/types";
 
 const refList = z.array(z.string()).default([]);
@@ -25,7 +27,7 @@ const baseSchema = z.object({
 const optionSchema = z.object({ text: z.string().max(400), correct: z.boolean(), consequence: z.string().max(500) });
 const stepSchema = z.object({ text: z.string().max(300), is_error: z.boolean(), fix: z.string().max(300).optional() });
 
-const shapes: Record<ActivityType, string> = {
+const shapes: Record<PlanStepType, string> = {
   explain_ask: `A short micro-lesson (display_text) followed by one natural open question (prompt) that asks the learner to explain or apply the idea in their own words.`,
   scenario: `A realistic situation from the material's own setting (display_text) and a decision (prompt) with exactly 3 "options". Exactly one option is correct per the source. Each option has a "consequence" that says what the source requires or warns about for that choice. Do not invent outcomes, penalties, numbers, or reactions that the source does not state; if the source is silent, say the choice does or does not follow the policy and why. Add "options":[{"text","correct":boolean,"consequence"}].`,
   spot_error: `A short story of someone applying the idea step by step (display_text). Add "steps":[{"text","is_error":boolean,"fix"}] with 4 or 5 steps in order, exactly one step is wrong compared to the source, and "fix" states the correct action for that step using the source's own facts. prompt asks the learner to find the step that went wrong.`,
@@ -34,6 +36,8 @@ const shapes: Record<ActivityType, string> = {
   teach_back: `A friend who half understands the concept asks the learner to explain it (display_text in the friend's voice). prompt invites the explanation. expected_points lists what a complete explanation covers.`,
   spaced_recall: `A quick story beat that makes the learner recall this earlier concept without feeling tested (display_text), then one open question (prompt).`,
   reflection: `A short, warm reflection moment (display_text) and a prompt asking how confident the learner feels about the concept and one thing they would do differently next time they use it. expected_points can be empty.`,
+  capstone: `A capstone case: one realistic, compound situation from the material's own setting (display_text, up to 120 words) that can only be handled well by using ALL of the listed topics together. prompt asks the learner to say, in their own words, what they would do and why. expected_points has at least one point per topic, each tied to a chunk ref. Do not give options.`,
+  crossroads: `A crossroads: the situation reaches a fork (display_text) and the learner must decide what happens next (prompt). Give exactly 3 "options", each a different path a person in the situation could take. Exactly one path follows the source. Each option's "consequence" says, in one or two sentences, where that path leads next in the situation, and whether it follows what the source requires or warns about, with no invented outcomes, penalties or numbers. Add "options":[{"text","correct":boolean,"consequence"}].`,
 };
 
 const difficultyText = (level: number) =>
@@ -51,6 +55,12 @@ export type ActivityInput = {
   intent?: string;
   workedExample?: boolean;
   learnerContext?: string;
+  /** The storyboard's people and setting, so missions continue the same story. */
+  storyContext?: string;
+  /** What the learner's last Crossroads choice led to. The next situation picks up from there. */
+  carryOver?: string;
+  /** Every topic a capstone case covers. The first is concept.id. */
+  conceptIds?: string[];
   config: AppConfig;
   requestId?: string;
   userHash?: string;
@@ -63,7 +73,7 @@ export function missedLanguage(language: Language, text: string) {
 
 const retryInRomanUrdu = "Your previous reply was in English. Write the same JSON again with every learner-facing field in Roman Urdu.";
 
-async function generateActivityOnce(input: ActivityInput & { type: ActivityType }, retry: boolean): Promise<Activity> {
+async function generateActivityOnce(input: ActivityInput & { type: PlanStepType }, retry: boolean): Promise<Activity> {
   const { type, concept, chunks, config } = input;
   const response = await generateWithFallback({
     task: "fast",
@@ -79,9 +89,9 @@ async function generateActivityOnce(input: ActivityInput & { type: ActivityType 
       { role: "system", content: tutorSystemPrompt({ config, persona: input.persona, language: input.language, pace: input.pace }) },
       {
         role: "user",
-        content: `Create a ${type} activity for the concept "${concept.name}" (${concept.summary.slice(0, 200)}).
+        content: `Create a ${type} activity for the concept "${concept.name}" (${concept.summary.slice(0, 450)}).
 Difficulty ${input.difficulty}/5: ${difficultyText(input.difficulty)}. Pace: ${input.pace}. ${input.intent ? `Intent: ${input.intent}.` : ""}
-${input.workedExample ? "The learner struggled just now. Start display_text with a short worked example from the source before the question.\n" : ""}${input.learnerContext ? `Learner context (reuse their words when helpful): ${input.learnerContext.slice(0, 300)}\n` : ""}
+${input.workedExample ? "The learner struggled just now. Start display_text with a short worked example from the source before the question.\n" : ""}${input.learnerContext ? `Learner context (reuse their words when helpful): ${input.learnerContext.slice(0, 300)}\n` : ""}${input.storyContext ? `${input.storyContext}\n` : ""}${input.carryOver ? `Continue from the learner's last decision. What it led to: ${input.carryOver.slice(0, 400)} Open display_text by picking up from that outcome, then set the new situation.\n` : ""}
 ${shapes[type]}
 Return JSON with: "title" (3 to 6 words), "display_text", "prompt", "hints" (2 hints, gentle to specific), "expected_points" ([{"text","refs":["S1"]}] what a good answer contains, each tied to a chunk ref), "source_refs" (chunk refs used), plus the type specific fields above.
 Use only facts from the source chunks. Cite refs exactly as given (S1, S2...).
@@ -129,7 +139,7 @@ async function generateLesson(input: ActivityInput, retry: boolean): Promise<Act
     task: "fast",
     model: process.env.LLM_FAST_MODEL ?? "",
     jsonMode: true,
-    maxTokens: 1_200,
+    maxTokens: 2_000,
     timeoutMs: 15_000,
     temperature: 0.4,
     purpose: "activity.lesson",
@@ -139,9 +149,10 @@ async function generateLesson(input: ActivityInput, retry: boolean): Promise<Act
       { role: "system", content: tutorSystemPrompt({ config, persona: input.persona, language: input.language, pace: input.pace }) },
       {
         role: "user",
-        content: `Teach the concept "${concept.name}" (${concept.summary.slice(0, 200)}) as a short visual lesson. This comes BEFORE any question, so teach, do not ask.
+        content: `Teach the concept "${concept.name}" (${concept.summary.slice(0, 450)}) as a short visual lesson. This comes BEFORE any question, so teach, do not ask.
 Difficulty ${input.difficulty}/5: ${difficultyText(input.difficulty)}.
-Return JSON: {"title": 3 to 6 words, "key_idea": one sentence with the single most important idea, "notes": 2 to 4 sticky notes, each a fact a beginner must remember in at most 14 words, "flow": if the source describes a process, sequence or cause and effect, 3 to 5 short step labels in order (at most 8 words each), otherwise [], "example": one short concrete example from the source context in at most 40 words, "source_refs": ["S1"]}.
+${input.storyContext ? `${input.storyContext} The example may feature these people.\n` : ""}Return JSON: {"title": 3 to 6 words, "key_idea": one sentence with the single most important idea, "notes": 2 to 4 sticky notes, each a fact a beginner must remember in at most 14 words, "flow": if the source describes a process, sequence or cause and effect, 3 to 5 short step labels in order (at most 8 words each), otherwise [], "example": one short concrete example from the source context in at most 40 words, "source_refs": ["S1"], ${visualPromptShape}}.
+Never invent a number, date or comparison the source does not state.
 Use only facts from the source chunks. Cite refs exactly as given (S1, S2...).
 <source>
 ${sourceBlock(chunks)}
@@ -150,7 +161,10 @@ ${languageRule(input.language)}${retry ? `\n${retryInRomanUrdu}` : ""}`,
       },
     ],
   });
-  const raw = lessonSchema.parse(repairJson<unknown>(response.text));
+  const json = repairJson<Record<string, unknown>>(response.text);
+  const raw = lessonSchema.parse(json);
+  // Numbers and dates are kept only when the source chunks state them.
+  const visual = groundVisual(parseLessonVisual(json.visual), chunks.map((chunk) => chunk.text).join("\n"));
   const cited = refsToIds(raw.source_refs, chunks);
   const refs = raw.source_refs.length ? raw.source_refs : chunks.slice(0, 1).map((chunk) => chunk.ref);
   return {
@@ -166,11 +180,11 @@ ${languageRule(input.language)}${retry ? `\n${retryInRomanUrdu}` : ""}`,
     expected_points: raw.notes.map((text) => ({ text, refs })),
     source_chunk_ids: cited.length ? cited : chunks.slice(0, 2).map((chunk) => chunk.id),
     grounded: "unverified",
-    lesson: { key_idea: raw.key_idea, notes: raw.notes, flow: raw.flow.length >= 3 ? raw.flow.slice(0, 5) : [], example: raw.example },
+    lesson: { key_idea: raw.key_idea, notes: raw.notes, flow: raw.flow.length >= 3 ? raw.flow.slice(0, 5) : [], example: raw.example, visual },
   };
 }
 
-function buildActivity(input: ActivityInput & { type: ActivityType }, raw: Record<string, unknown>): Activity {
+function buildActivity(input: ActivityInput & { type: PlanStepType }, raw: Record<string, unknown>): Activity {
   const base = baseSchema.parse(raw);
   const { chunks, concept, type } = input;
   const cited = refsToIds([...base.source_refs, ...base.expected_points.flatMap((point) => point.refs)], chunks);
@@ -190,7 +204,7 @@ function buildActivity(input: ActivityInput & { type: ActivityType }, raw: Recor
     worked_example: base.worked_example,
   };
 
-  if (type === "scenario") {
+  if (type === "scenario" || type === "crossroads") {
     const options = z.array(optionSchema).min(2).max(4).parse(raw.options);
     if (options.filter((option) => option.correct).length !== 1) throw new Error("Scenario needs exactly one correct option");
     activity.options = options.map((option) => ({ ...option, id: randomUUID().slice(0, 8) }));
@@ -210,6 +224,7 @@ function buildActivity(input: ActivityInput & { type: ActivityType }, raw: Recor
       .parse(raw.roleplay);
     activity.roleplay = { ...roleplay, max_turns: 3 };
   }
+  if (input.conceptIds && input.conceptIds.length > 1) activity.concept_ids = input.conceptIds;
   return activity;
 }
 

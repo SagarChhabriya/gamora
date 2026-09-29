@@ -42,7 +42,7 @@ async function normalise(text: string) {
  * Voice input and output. Web Speech first, then recorded audio to the Whisper fallback route,
  * and always a text fallback. Raw audio is never stored.
  */
-export function useVoice(language: Language, onText?: (text: string) => void) {
+export function useVoice(language: Language, onText?: (text: string) => void, onFinal?: (text: string) => void) {
   const [listening, setListening] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [note, setNote] = useState<string | null>(null);
@@ -53,9 +53,11 @@ export function useVoice(language: Language, onText?: (text: string) => void) {
   const chunks = useRef<Blob[]>([]);
   const finalText = useRef("");
   const textListener = useRef(onText);
+  const finalListener = useRef(onFinal);
   useEffect(() => {
     textListener.current = onText;
-  }, [onText]);
+    finalListener.current = onFinal;
+  }, [onText, onFinal]);
   const emit = useCallback((text: string) => {
     setTranscript(text);
     textListener.current?.(text);
@@ -92,6 +94,7 @@ export function useVoice(language: Language, onText?: (text: string) => void) {
         const payload = (await response.json().catch(() => ({}))) as { text?: string; error?: string };
         if (payload.text) {
           emit(payload.text);
+          finalListener.current?.(payload.text);
           setNote(null);
         } else {
           setNote(payload.error ?? "Voice did not come through. You can type instead.");
@@ -137,7 +140,14 @@ export function useVoice(language: Language, onText?: (text: string) => void) {
     rec.onend = async () => {
       setListening(false);
       const text = finalText.current.trim();
-      if (text) emit(await normalise(text));
+      if (text) {
+        const normalised = await normalise(text);
+        emit(normalised);
+        finalListener.current?.(normalised);
+      } else {
+        // Silence still ends a listening turn, so hands-free mode can decide what to do next.
+        finalListener.current?.("");
+      }
     };
     recognition.current = rec;
     try {
@@ -155,7 +165,7 @@ export function useVoice(language: Language, onText?: (text: string) => void) {
 
   /** Speaks text. Picks an ur-PK voice for Roman Urdu when available, else an English voice. */
   const speak = useCallback(
-    (text: string) => {
+    (text: string, options?: { onEnd?: () => void }) => {
       if (!ttsSupported || !text) return false;
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text.replace(/[*_#>`]/g, ""));
@@ -167,7 +177,11 @@ export function useVoice(language: Language, onText?: (text: string) => void) {
       utterance.lang = preferred?.lang ?? "en-US";
       utterance.rate = 1;
       utterance.onstart = () => setSpeaking(true);
-      utterance.onend = () => setSpeaking(false);
+      utterance.onend = () => {
+        setSpeaking(false);
+        options?.onEnd?.();
+      };
+      // A cancelled utterance (the next one started) is not a finish, so it does not call onEnd.
       utterance.onerror = () => setSpeaking(false);
       window.speechSynthesis.speak(utterance);
       return true;
@@ -180,5 +194,8 @@ export function useVoice(language: Language, onText?: (text: string) => void) {
     setSpeaking(false);
   }, [ttsSupported]);
 
-  return { listening, transcript, setTranscript, note, setNote, start, stop, speak, silence, speaking, sttSupported, ttsSupported, hasVoices: voices.length > 0 };
+  // Hands-free needs recognition that ends on its own when the learner stops talking.
+  const autoStopSupported = typeof window !== "undefined" && Boolean(recognitionCtor());
+
+  return { listening, transcript, setTranscript, note, setNote, start, stop, speak, silence, speaking, sttSupported, ttsSupported, autoStopSupported, hasVoices: voices.length > 0 };
 }
