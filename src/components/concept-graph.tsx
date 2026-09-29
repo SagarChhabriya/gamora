@@ -234,7 +234,7 @@ export function ConceptGraph({ concepts, edges }: Props) {
       </div>
 
       <details className="border border-ink/15 bg-panel p-4">
-        <summary className="cursor-pointer text-sm font-semibold">Suggested learning order (text version)</summary>
+        <summary className="cursor-pointer text-sm font-semibold">Suggested learning order, as a list</summary>
         <ol className="mt-3 space-y-1 text-sm">
           {ordered.map((concept) => (
             <li key={concept.id}>

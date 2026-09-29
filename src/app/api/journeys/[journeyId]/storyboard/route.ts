@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { requireUser } from "@/lib/auth/server";
 import { getActiveConfig } from "@/lib/config/active";
+import { noticeMessages, withLlmNotices } from "@/lib/llm/notices";
 import { getOrCreateRequestId } from "@/lib/observability/request-id";
 import { reportError } from "@/lib/observability/sentry";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
@@ -33,9 +34,9 @@ export async function GET(request: Request, context: RouteContext) {
     if (limited) return limited;
   }
   try {
-    const storyboard = await ensureStoryboard({ journey, config, requestId, userHash: auth.user.userHash });
+    const { result: storyboard, notices } = await withLlmNotices(() => ensureStoryboard({ journey, config, requestId, userHash: auth.user.userHash }));
     if (storyboard === "pending") return NextResponse.json({ status: "pending" }, { status: 202 });
-    return NextResponse.json({ storyboard });
+    return NextResponse.json({ storyboard, notices: noticeMessages(notices) });
   } catch (error) {
     reportError(error, { requestId, userHash: auth.user.userHash, area: "storyboard" });
     return NextResponse.json({ error: "Could not prepare the storyboard. Please try again." }, { status: 500 });

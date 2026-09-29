@@ -11,6 +11,7 @@ import {
   type GenerateResponse,
   type LLMProvider,
 } from "@/lib/llm/types";
+import { reportLlm } from "@/lib/llm/notices";
 import { logEvent, type EventInput } from "@/lib/observability/events";
 import { getOrCreateRequestId } from "@/lib/observability/request-id";
 
@@ -141,7 +142,10 @@ export async function generateWithFallback(
   const chain = providerChain(request.skipProviders);
   let lastError: unknown = new Error("No LLM provider is configured");
   for (const [position, provider] of chain.entries()) {
-    for (const model of modelsForProvider(provider, request)) {
+    // A request too large for this provider is too large for its other model as well.
+    let tooLarge = false;
+    for (const [modelPosition, model] of modelsForProvider(provider, request).entries()) {
+      if (tooLarge) break;
       const keys = keyOrder(provider.name);
       let shortestWait = Infinity;
       let waited = false;
@@ -151,6 +155,7 @@ export async function generateWithFallback(
         if (isResting(provider.name, label)) {
           if (!waited && shortestWait <= 4_000) {
             waited = true;
+            reportLlm("busy");
             await sleep(shortestWait + 150);
           } else if (index > 0 || keys.length > 1) continue;
         }
@@ -188,6 +193,7 @@ export async function generateWithFallback(
               ),
             },
           });
+          if (position > 0 || modelPosition > 0) reportLlm("backup");
           if (cacheKey)
             await writeCache(
               cacheKey,
@@ -216,6 +222,10 @@ export async function generateWithFallback(
           });
           const rateLimited =
             error instanceof LLMProviderError && /\(429\)/.test(error.message);
+          if (error instanceof LLMProviderError && /\(413\)/.test(error.message)) {
+            tooLarge = true;
+            break;
+          }
           if (rateLimited) {
             // This contributor's quota is spent for now. Rest the key and try the next one immediately.
             const wait = (error as LLMProviderError).retryAfterMs ?? 20_000;
@@ -223,6 +233,7 @@ export async function generateWithFallback(
             shortestWait = Math.min(shortestWait, wait);
             if (index === keys.length - 1 && !waited && wait <= 4_000) {
               waited = true;
+              reportLlm("busy");
               await sleep(wait + 150);
               index -= 1;
             }
@@ -241,6 +252,8 @@ export async function generateWithFallback(
       }
     }
   }
+  // The verifier failing is not something the learner needs to hear about; the content still shows.
+  if (!purpose.startsWith("grounding")) reportLlm("unavailable");
   throw lastError instanceof Error
     ? lastError
     : new Error("No LLM provider succeeded");

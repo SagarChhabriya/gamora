@@ -6,6 +6,8 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { AccountMenu } from "@/components/account-menu";
 import { AssistantWidget } from "@/components/assistant-widget";
+import { LlmNotices } from "@/components/llm-notices";
+import { Tour } from "@/components/tour";
 import { useSession } from "@/lib/auth/client";
 import type { SessionPayload } from "@/lib/auth/supabase-auth";
 import { cx } from "@/components/ui";
@@ -126,6 +128,8 @@ export function AppShell({ children, requireRole, wide }: Props) {
         )}
       </main>
       <AssistantWidget />
+      <LlmNotices />
+      <Tour />
     </div>
   );
 }

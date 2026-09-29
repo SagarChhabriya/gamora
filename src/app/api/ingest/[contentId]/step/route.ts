@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { requireUser } from "@/lib/auth/server";
 import { getJobForContent, runIngestStep } from "@/lib/ingest/pipeline";
+import { noticeMessages, withLlmNotices } from "@/lib/llm/notices";
 import { getOrCreateRequestId } from "@/lib/observability/request-id";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 
@@ -26,9 +27,11 @@ export async function POST(request: Request, context: RouteContext) {
   const job = await getJobForContent(contentId, auth.user.role === "admin" ? undefined : auth.user.id);
   if (!job) return NextResponse.json({ error: "Ingest job not found" }, { status: 404 });
 
-  const result = await runIngestStep(job, {
-    requestId: getOrCreateRequestId(request.headers.get("x-request-id")),
-    userHash: auth.user.userHash,
-  });
-  return NextResponse.json({ job: result }, { status: result.status === "failed" ? 422 : 200 });
+  const { result, notices } = await withLlmNotices(() =>
+    runIngestStep(job, {
+      requestId: getOrCreateRequestId(request.headers.get("x-request-id")),
+      userHash: auth.user.userHash,
+    }),
+  );
+  return NextResponse.json({ job: result, notices: noticeMessages(notices) }, { status: result.status === "failed" ? 422 : 200 });
 }

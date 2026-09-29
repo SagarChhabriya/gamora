@@ -38,12 +38,20 @@ function union(lists: string[][]) {
 /** Builds a topic from its members. A topic with one member is that member, with no key points. */
 export function topicFrom(members: TopicUnit[], name?: string, summary?: string): Topic {
   const single = members.length === 1;
+  // The same idea found in several batches becomes one key point with all of its sources.
+  const points = new Map<string, KeyPoint>();
+  for (const unit of members) {
+    const key = unit.name.trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+    const existing = points.get(key);
+    if (existing) existing.source_chunk_ids = [...new Set([...existing.source_chunk_ids, ...unit.source_chunk_ids])];
+    else points.set(key, { name: unit.name, summary: unit.summary, difficulty: unit.difficulty, source_chunk_ids: [...unit.source_chunk_ids] });
+  }
   return {
     name: (name ?? members[0].name).slice(0, 120),
     summary: (summary ?? members[0].summary).slice(0, 500),
     difficulty: Math.max(1, Math.min(5, Math.round(members.reduce((sum, unit) => sum + unit.difficulty, 0) / members.length))),
     source_chunk_ids: union(members.map((unit) => unit.source_chunk_ids)),
-    key_points: single ? [] : members.map(({ name: pointName, summary: pointSummary, difficulty, source_chunk_ids }) => ({ name: pointName, summary: pointSummary, difficulty, source_chunk_ids })),
+    key_points: single || points.size < 2 ? [] : [...points.values()],
     members,
   };
 }
@@ -123,8 +131,9 @@ export async function groupIntoTopics(units: TopicUnit[], cap: number, context: 
   if (units.length <= cap) return { topics: units.map((unit) => topicFrom([unit])), grouper: "none" };
   // Keep the prompt inside small free-tier limits: short summaries, and a hard ceiling on units.
   const list = units
-    .slice(0, 400)
-    .map((unit, index) => `${index}. ${unit.name}: ${unit.summary.replace(/\s+/g, " ").slice(0, 110)}`)
+    .slice(0, 300)
+    // Free tiers refuse requests over about 8,000 tokens, so long lists send names only.
+    .map((unit, index) => (units.length > 90 ? `${index}. ${unit.name.slice(0, 70)}` : `${index}. ${unit.name}: ${unit.summary.replace(/\s+/g, " ").slice(0, 110)}`))
     .join("\n");
   try {
     const response = await generateWithFallback({
@@ -169,18 +178,23 @@ export function stepFocus(
   stepIndex: number,
   isLesson: boolean,
 ) {
+  // summary is what a learner may see; focus is guidance for the model only, never shown.
   const points = topic.key_points ?? [];
-  if (!points.length) return { summary: topic.summary, query: topic.name, chunkIds: topic.source_chunk_ids };
+  if (!points.length) return { summary: topic.summary, focus: undefined, query: topic.name, chunkIds: topic.source_chunk_ids };
   if (isLesson) {
+    // Only a handful of names: the lesson introduces the topic, later steps take the points one by one.
+    const names = [...new Set(points.map((point) => point.name.trim()))];
     return {
-      summary: `${topic.summary} Key points: ${points.map((point) => point.name).join("; ")}.`,
+      summary: topic.summary,
+      focus: `Key points include: ${names.slice(0, 6).join("; ")}${names.length > 6 ? `, and ${names.length - 6} more` : ""}.`,
       query: topic.name,
       chunkIds: [...new Set(points.flatMap((point) => point.source_chunk_ids.slice(0, 1)).concat(topic.source_chunk_ids))],
     };
   }
   const point = points[stepIndex % points.length];
   return {
-    summary: `${topic.summary} This step focuses on the key point "${point.name}": ${point.summary}`,
+    summary: topic.summary,
+    focus: `This step focuses on the key point "${point.name}": ${point.summary}`,
     query: point.name,
     chunkIds: [...new Set([...point.source_chunk_ids, ...topic.source_chunk_ids])],
   };

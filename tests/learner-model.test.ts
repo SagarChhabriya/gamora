@@ -97,3 +97,26 @@ describe("journey planner", () => {
     expect(activities.some((activity) => activity.type === "spaced_recall")).toBe(true);
   });
 });
+
+describe("fair mastery", () => {
+  it("two clean correct answers on a topic unlock the next mission, three master it", async () => {
+    const { applyEvidence, emptyMastery } = await import("@/lib/learner-model/mastery");
+    const { defaultConfig: config } = await import("@/lib/config/schema");
+    const correct = [{ signal: "correct" as const, strength: 1 }];
+    const one = applyEvidence(emptyMastery, correct, config);
+    const two = applyEvidence(one, correct, config);
+    const three = applyEvidence(two, correct, config);
+    expect(one.mastery).toBeLessThan(config.mastery.unlock_threshold);
+    expect(two.mastery).toBeGreaterThanOrEqual(config.mastery.unlock_threshold);
+    expect(three.mastery).toBeGreaterThanOrEqual(config.mastery.mastered_threshold);
+  });
+
+  it("a mostly right answer counts for more than a barely right one", async () => {
+    const { applyEvidence, emptyMastery } = await import("@/lib/learner-model/mastery");
+    const { defaultConfig: config } = await import("@/lib/config/schema");
+    const { signalsFor } = await import("@/lib/tutor/evaluate");
+    const mostly = applyEvidence(emptyMastery, signalsFor({ type: "explain_ask", correctness: 0.75, attempts: 0, hintsUsed: 0, selfCorrection: false }), config);
+    const barely = applyEvidence(emptyMastery, signalsFor({ type: "explain_ask", correctness: 0.45, attempts: 0, hintsUsed: 0, selfCorrection: false }), config);
+    expect(mostly.mastery).toBeGreaterThan(barely.mastery);
+  });
+});

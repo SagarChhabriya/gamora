@@ -93,7 +93,8 @@ export async function extractConcepts(chunks: SourceChunk[], context: CallContex
       task: "fast",
       model: process.env.LLM_FAST_MODEL ?? "",
       jsonMode: true,
-      maxTokens: 3_000,
+      // Groq counts the reply budget against its per-minute limit too, so it stays modest.
+      maxTokens: 1_800,
       timeoutMs: 25_000,
       purpose: "ingest.concepts",
       cacheKey: "concepts:v3",

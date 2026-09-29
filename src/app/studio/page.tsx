@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEv
 
 import { AppShell } from "@/components/app-shell";
 import { ConceptGraph } from "@/components/concept-graph";
+import { showNotices, type NoticeMessage } from "@/components/llm-notices";
 import { RouteChooser } from "@/components/route-chooser";
 import { useToast } from "@/components/toast";
 import { Alert, Button, Card, Eyebrow, Field, Input, Textarea, cx } from "@/components/ui";
@@ -15,7 +16,7 @@ import { isAllowedHost } from "@/lib/ingest/security";
 
 type Mode = "text" | "url" | "file";
 type Job = { id: string; content_id: string; step: string; status: string; progress: number; error: string | null; batch: number | null; batches: number | null };
-type Debug = {
+type SourceMap = {
   content: { id: string; title: string; status: string; language: string | null; chunk_count: number; topic_cap: number | null };
   job: Job | null;
   chunks: Array<{ id: string; idx: number; text: string; tokens: number | null }>;
@@ -32,7 +33,7 @@ const modes: Array<{ id: Mode; label: string; hint: string }> = [
 
 const stepLabels = [
   { id: "upload", label: "Read and scan" },
-  { id: "chunk", label: "Split into sources" },
+  { id: "chunk", label: "Split into passages" },
   { id: "concepts", label: "Find concepts" },
   { id: "group", label: "Group into topics" },
   { id: "link", label: "Map the order" },
@@ -59,7 +60,7 @@ function Studio() {
   const [job, setJob] = useState<Job | null>(null);
   const [elapsed, setElapsed] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [debug, setDebug] = useState<Debug | null>(null);
+  const [sourceMap, setSourceMap] = useState<SourceMap | null>(null);
   const [contents, setContents] = useState<ContentRow[]>([]);
   const [building, setBuilding] = useState(false);
   const [inspecting, setInspecting] = useState<string | null>(null);
@@ -67,7 +68,7 @@ function Studio() {
   const [topicLimits, setTopicLimits] = useState<{ cap: number; max: number } | null>(null);
   const [regrouping, setRegrouping] = useState<{ id: string; cap: number; running: boolean } | null>(null);
   const [choosing, setChoosing] = useState<{ id: string; where: "map" | "list" } | null>(null);
-  const debugRef = useRef<HTMLElement>(null);
+  const mapRef = useRef<HTMLElement>(null);
   const toast = useToast();
 
   const loadContents = useCallback(async () => {
@@ -88,14 +89,14 @@ function Studio() {
       .catch(() => setUrlDomains(null));
   }, [loadContents]);
 
-  async function loadDebug(contentId: string) {
+  async function loadSourceMap(contentId: string) {
     setInspecting(contentId);
     try {
       const response = await authFetch(`/api/ingest/${contentId}`);
       if (!response.ok) throw new Error("Could not load this source");
-      setDebug((await response.json()) as Debug);
+      setSourceMap((await response.json()) as SourceMap);
       // Bring the map into view so the result of Inspect is visible.
-      requestAnimationFrame(() => debugRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+      requestAnimationFrame(() => mapRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
     } catch (caught) {
       toast.show(caught instanceof Error ? caught.message : "Could not load this source", "error");
     } finally {
@@ -107,7 +108,7 @@ function Studio() {
     if (!window.confirm(`Remove "${content.title}" and any journeys built from it?`)) return;
     const response = await authFetch(`/api/contents/${content.id}`, { method: "DELETE" });
     if (response.ok) {
-      if (debug?.content.id === content.id) setDebug(null);
+      if (sourceMap?.content.id === content.id) setSourceMap(null);
       toast.show(`Removed "${content.title}".`, "info");
       await loadContents();
     } else toast.show("Could not remove this source.", "error");
@@ -117,7 +118,8 @@ function Studio() {
     // A long PDF runs one step per batch of chunks, so leave plenty of room.
     for (let guard = 0; guard < 200; guard += 1) {
       const response = await authFetch(`/api/ingest/${contentId}/step`, { method: "POST" });
-      const payload = (await response.json()) as { job?: Job; error?: string };
+      const payload = (await response.json()) as { job?: Job; error?: string; notices?: NoticeMessage[] };
+      showNotices(payload.notices);
       if (!payload.job) throw new Error(payload.error ?? "Ingest step failed");
       setJob(payload.job);
       setElapsed(clock() - started);
@@ -130,7 +132,7 @@ function Studio() {
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError(null);
-    setDebug(null);
+    setSourceMap(null);
     setJob(null);
     setUploading(true);
     const started = clock();
@@ -168,7 +170,7 @@ function Studio() {
       setJob(payload.job);
       if (payload.duplicate) toast.show("You already added this material, so the existing map is reused.", "info");
       await runSteps(payload.content_id, started);
-      await loadDebug(payload.content_id);
+      await loadSourceMap(payload.content_id);
       await loadContents();
       if (!payload.duplicate) toast.show(`Content map ready in ${((clock() - started) / 1000).toFixed(1)} s. You can build your journey now.`);
     } catch (caught) {
@@ -194,7 +196,7 @@ function Studio() {
       setJob(payload.job);
       window.scrollTo({ top: 0, behavior: "smooth" });
       await runSteps(content.id, started);
-      await loadDebug(content.id);
+      await loadSourceMap(content.id);
       await loadContents();
       toast.show(`"${content.title}" now has at most ${cap} topics. New journeys use them.`);
       setRegrouping(null);
@@ -213,7 +215,8 @@ function Studio() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content_id: contentId, route }),
       });
-      const payload = (await response.json()) as { journey_id?: string; error?: string };
+      const payload = (await response.json()) as { journey_id?: string; error?: string; notices?: NoticeMessage[] };
+      showNotices(payload.notices);
       if (!response.ok || !payload.journey_id) throw new Error(payload.error ?? "Could not build the journey");
       router.push(`/journey/${payload.journey_id}`);
     } catch (caught) {
@@ -269,7 +272,7 @@ function Studio() {
         </div>
 
         <Card>
-          <form onSubmit={submit} className="space-y-5">
+          <form onSubmit={submit} className="space-y-5" data-tour="source-form">
             <Field label="Source title">
               <Input value={title} onChange={(event) => setTitle(event.target.value)} required maxLength={200} placeholder="e.g. Photosynthesis, chapter 3" />
             </Field>
@@ -324,7 +327,7 @@ function Studio() {
                 </Link>
               </p>
             ) : null}
-            <Button type="submit" disabled={active} className="w-full">
+            <Button type="submit" disabled={active} className="w-full" data-tour="build-map">
               {active ? "Working on it..." : "Build a content map"}
             </Button>
           </form>
@@ -332,30 +335,30 @@ function Studio() {
         </Card>
       </div>
 
-      {debug && (
-        <section ref={debugRef} aria-live="polite" className="animate-rise scroll-mt-24 space-y-6 border-t border-ink/15 pt-8">
+      {sourceMap && (
+        <section ref={mapRef} aria-live="polite" className="animate-rise scroll-mt-24 space-y-6 border-t border-ink/15 pt-8">
           <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
             <div>
               <Eyebrow>Source map ready</Eyebrow>
               <h2 className="mt-2 text-3xl font-semibold tracking-[-0.03em]">
-                {debug.chunks.length} sources / {debug.concepts.length} topics / {debug.edges.length} links
+                {sourceMap.concepts.length} topics / {sourceMap.edges.length} links / {sourceMap.chunks.length} passages
               </h2>
               <p className="mt-1 text-sm text-ink/60">
-                {debug.content.topic_cap ? `Limit ${debug.content.topic_cap} topics / ` : ""}
-                Language detected: {debug.content.language ?? "unknown"}
+                {sourceMap.content.topic_cap ? `Limit ${sourceMap.content.topic_cap} topics / ` : ""}
+                Language detected: {sourceMap.content.language ?? "unknown"}
                 {elapsed !== null ? ` / processed in ${(elapsed / 1000).toFixed(1)} s` : ""}
               </p>
             </div>
-            <Button onClick={() => setChoosing({ id: debug.content.id, where: "map" })} disabled={building} aria-expanded={choosing?.where === "map"}>
+            <Button onClick={() => setChoosing({ id: sourceMap.content.id, where: "map" })} disabled={building} aria-expanded={choosing?.where === "map"}>
               {building ? "Planning your journey..." : "Build my journey"}
             </Button>
           </div>
-          {choosing?.where === "map" && choosing.id === debug.content.id ? (
-            <RouteChooser busy={building} onChoose={(route) => void buildJourney(debug.content.id, route)} onCancel={() => setChoosing(null)} />
+          {choosing?.where === "map" && choosing.id === sourceMap.content.id ? (
+            <RouteChooser busy={building} onChoose={(route) => void buildJourney(sourceMap.content.id, route)} onCancel={() => setChoosing(null)} />
           ) : null}
-          <ConceptGraph concepts={debug.concepts} edges={debug.edges} />
+          <ConceptGraph concepts={sourceMap.concepts} edges={sourceMap.edges} />
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {debug.concepts.map((concept, index) => (
+            {sourceMap.concepts.map((concept, index) => (
               <article key={concept.id} className="border border-ink/15 bg-panel p-4">
                 <div className="flex justify-between text-xs uppercase tracking-[0.12em] text-accent">
                   <span>Topic {String(index + 1).padStart(2, "0")}</span>
@@ -376,15 +379,15 @@ function Studio() {
                   </details>
                 ) : null}
                 <p className="mt-3 text-xs text-ink/50">
-                  Sources: {concept.source_chunk_ids.map((id) => `#${(debug.chunks.find((chunk) => chunk.id === id)?.idx ?? 0) + 1}`).join(", ")}
+                  Sources: {concept.source_chunk_ids.map((id) => `#${(sourceMap.chunks.find((chunk) => chunk.id === id)?.idx ?? 0) + 1}`).join(", ")}
                 </p>
               </article>
             ))}
           </div>
           <details className="border border-ink/15 bg-panel p-4">
-            <summary className="cursor-pointer text-sm font-semibold">Show source chunks (debug)</summary>
+            <summary className="cursor-pointer text-sm font-semibold">Show the passages Gamora read</summary>
             <ol className="mt-4 space-y-3">
-              {debug.chunks.map((chunk) => (
+              {sourceMap.chunks.map((chunk) => (
                 <li key={chunk.id} className="text-sm leading-6 text-ink/75">
                   <strong className="mr-2 text-accent">#{chunk.idx + 1}</strong>
                   {chunk.text.slice(0, 400)}
@@ -397,7 +400,7 @@ function Studio() {
       )}
 
       {toast.view}
-      <section className="space-y-4 border-t border-ink/15 pt-8">
+      <section className="space-y-4 border-t border-ink/15 pt-8" data-tour="sources">
         <h2 className="text-xl font-semibold">Your sources</h2>
         <p className="-mt-2 text-sm text-ink/60">Only you see your sources. Sources from the shared Gamora library are marked.</p>
         {contents.length === 0 ? (
@@ -410,12 +413,12 @@ function Studio() {
                   <p className="font-semibold">{content.title}</p>
                   <p className="text-xs text-ink/55">
                     {content.mine ? "" : "Gamora library / "}
-                    {content.status} / {content.chunk_count} sources / {content.language ?? "unknown"}
+                    {content.status} / {content.chunk_count} passages / {content.language ?? "unknown"}
                   </p>
                 </div>
                 <div className="flex gap-2">
-                  <Button variant="ghost" onClick={() => loadDebug(content.id)} disabled={inspecting !== null} aria-busy={inspecting === content.id}>
-                    {inspecting === content.id ? "Opening..." : debug?.content.id === content.id ? "Inspecting" : "Inspect"}
+                  <Button variant="ghost" onClick={() => loadSourceMap(content.id)} disabled={inspecting !== null} aria-busy={inspecting === content.id}>
+                    {inspecting === content.id ? "Opening..." : sourceMap?.content.id === content.id ? "Inspecting" : "Inspect"}
                   </Button>
                   {content.mine && content.status === "ready" ? (
                     <Button

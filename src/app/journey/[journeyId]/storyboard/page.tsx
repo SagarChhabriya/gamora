@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { AppShell } from "@/components/app-shell";
+import { showNotices, type NoticeMessage } from "@/components/llm-notices";
 import { StoryboardPlayer } from "@/components/storyboard-player";
 import { Alert, Eyebrow } from "@/components/ui";
 import { authFetch } from "@/lib/auth/client";
@@ -41,7 +42,8 @@ function StoryboardScreen() {
         timer = window.setTimeout(() => void load(attempt + 1), 4_000);
         return;
       }
-      const payload = (await response.json().catch(() => ({}))) as { storyboard?: Storyboard; error?: string };
+      const payload = (await response.json().catch(() => ({}))) as { storyboard?: Storyboard; error?: string; notices?: NoticeMessage[] };
+      showNotices(payload.notices);
       if (!response.ok || !payload.storyboard) setError(payload.error ?? "Could not prepare the storyboard.");
       else setStoryboard(payload.storyboard);
     };

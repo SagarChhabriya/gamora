@@ -23,6 +23,12 @@ Help while learning: "I would like a hint" gives a hint. Hints never cost XP but
 
 Mastery: each concept has a mastery estimate. A concept counts as mastered at ${pct(config.mastery.mastered_threshold)}. Mastery fades slowly over time (${pct(config.mastery.decay_per_day)} a day), so revisiting keeps it fresh.
 
+Guided tour: "Take the tour" in the profile menu (and on the home page for new learners) walks the whole path: add material, build the map, build a journey, the storyboard, a mission, Tuning, Ask and preferences.
+
+When the AI is busy: free AI services limit how many requests they take per minute. When that happens Gamora waits briefly or switches to a backup model and shows a short notice saying so; if nothing answers in time it uses a simpler built-in version for that step, labelled "Quoted straight from your source".
+
+Challenge level: each activity shows Challenge 1 to 5. It starts from how familiar you said you are with the material in the intro chat (brand new starts lowest, knowing it well starts at 4), not from your time or connection. It then moves with your answers.
+
 Adaptation: Gamora raises the challenge after answers that are right without hints, and adds a worked example and guided choices after two misses in a row. It switches to Roman Urdu when you write in Roman Urdu.
 
 XP, levels, streaks, badges: correct answer ${xp.correct} XP, partial ${xp.partial} XP, fixing your own answer ${xp.self_corrected} XP, teaching a concept back ${xp.teach_back} XP, finishing a mission ${xp.mission_complete} XP. Lessons and clicks give no XP. Every ${XP_PER_LEVEL} XP is a new level. A streak counts days you learn; missing ${config.mechanics.streak_grace_days} day keeps it. Finished missions get 1 to 3 stars from mastery. Badges: ${Object.values(badgeCatalog)

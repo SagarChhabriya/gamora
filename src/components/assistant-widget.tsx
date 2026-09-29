@@ -152,6 +152,7 @@ export function AssistantWidget() {
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
         aria-label={open ? "Close Gamora help" : "Open Gamora help"}
+        data-tour="assistant"
         className="fixed bottom-4 right-4 z-50 grid h-13 w-13 place-items-center rounded-full bg-ink text-paper shadow-lg hover:bg-accent"
       >
         {open ? (

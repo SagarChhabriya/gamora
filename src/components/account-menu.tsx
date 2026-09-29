@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+import { startTour } from "@/components/tour";
 import { authFetch, signOut } from "@/lib/auth/client";
 import type { SessionPayload } from "@/lib/auth/supabase-auth";
 
@@ -62,6 +63,7 @@ export function AccountMenu({ session }: { session: SessionPayload }) {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`Account menu for ${name}`}
+        data-tour="account"
         onClick={() => setOpen((value) => !value)}
         className="ml-2 grid h-9 w-9 place-items-center rounded-full bg-ink text-sm font-semibold text-paper hover:bg-accent"
       >
@@ -95,6 +97,17 @@ export function AccountMenu({ session }: { session: SessionPayload }) {
               <Link role="menuitem" href="/onboarding" className={item} onClick={() => setOpen(false)}>
                 Update my profile
               </Link>
+              <button
+                role="menuitem"
+                type="button"
+                className={item}
+                onClick={() => {
+                  setOpen(false);
+                  startTour();
+                }}
+              >
+                Take the tour
+              </button>
               <button
                 role="menuitem"
                 type="button"

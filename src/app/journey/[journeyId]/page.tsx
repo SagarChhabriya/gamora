@@ -111,6 +111,7 @@ function JourneyMap() {
       {data.storyboard?.enabled ? (
         <section
           aria-label="Storyboard"
+          data-tour="storyboard"
           className={cx("flex flex-col gap-4 border p-5 sm:flex-row sm:items-center sm:justify-between", seen ? "border-ink/15 bg-panel" : "border-accent bg-paper")}
         >
           <div>
@@ -130,7 +131,7 @@ function JourneyMap() {
         </section>
       ) : null}
 
-      <section aria-label="Missions">
+      <section aria-label="Missions" data-tour="missions">
         <ol className="relative space-y-4 border-l-2 border-ink/15 pl-6">
           {data.missions.map((mission) => {
             const locked = mission.status === "locked";
@@ -190,7 +191,7 @@ function JourneyMap() {
         </ol>
       </section>
 
-      <section aria-label="Mastery heatmap" className="space-y-3">
+      <section aria-label="Mastery heatmap" className="space-y-3" data-tour="mastery">
         <h2 className="text-xl font-semibold">What you have shown so far</h2>
         <p className="text-sm text-ink/60">
           Estimated from how you answer, choose, fix mistakes and recall. No tests. Unlock at {Math.round(data.thresholds.unlock * 100)}%, mastered at{" "}

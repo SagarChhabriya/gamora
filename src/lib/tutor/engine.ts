@@ -10,6 +10,7 @@ import { stepFocus, type KeyPoint } from "@/lib/ingest/topics";
 import { storyContextFor, type Storyboard } from "@/lib/storyboard/story";
 import { applyEvidence, decayed, emptyMastery, type MasteryRow } from "@/lib/learner-model/mastery";
 import { kvDel, kvGet, kvSet } from "@/lib/llm/cache";
+import type { LlmNotice } from "@/lib/llm/notices";
 import { logEvent } from "@/lib/observability/events";
 import { supabaseRequest } from "@/lib/supabase/server";
 import { toClientActivity } from "@/lib/tutor/activity";
@@ -46,6 +47,7 @@ export type TurnEvent =
   | { type: "activity"; activity: ClientActivity; position: Position }
   | { type: "history"; items: HistoryItem[] }
   | { type: "mission_complete"; summary: MissionSummary }
+  | { type: "notice"; kind: LlmNotice; text: string }
   | { type: "error"; message: string }
   | { type: "done"; session_id: string };
 
@@ -147,14 +149,14 @@ async function writeTurns(sessionId: string, turns: Array<{ role: "assistant" | 
  * The learner's latest session for this mission, finished or not. A finished mission stays finished
  * across reloads; only an explicit practice request opens a new session after completion.
  */
-async function getOrCreateSession(input: { user: AuthUser; mission: Mission; journey: Journey; config: AppConfig; persona: Persona; language: Language; textOnly: boolean; practice: boolean }) {
+async function getOrCreateSession(input: { user: AuthUser; mission: Mission; journey: Journey; config: AppConfig; persona: Persona; language: Language; textOnly: boolean; practice: boolean; prior?: string }) {
   const existing = await supabaseRequest<SessionRow[]>(
     `sessions?learner_id=eq.${input.user.id}&mission_id=eq.${input.mission.id}&select=id,state,language&order=started_at.desc&limit=1`,
   );
   const latest = existing?.[0];
   if (latest?.state?.queue && !(input.practice && latest.state.completed)) return latest;
   const state: SessionState = {
-    ...initialPolicyState(input.persona, input.language, input.config),
+    ...initialPolicyState(input.persona, input.language, input.config, input.prior),
     mission_id: input.mission.id,
     journey_id: input.journey.id,
     persona: input.persona,
@@ -221,7 +223,7 @@ async function buildActivity(ctx: Ctx, state: SessionState, index: number): Prom
   // A grouped topic is practised one key point at a time, in turn across the mission.
   const focus = stepFocus(concept, state.queue.slice(0, index).filter((step) => step.concept_id === concept.id && step.type !== "lesson").length, item.type === "lesson");
   let chunks = await chunksFor(concept, focus);
-  let brief = { name: concept.name, summary: focus.summary };
+  let brief: { name: string; summary: string; focus?: string } = { name: concept.name, summary: focus.summary, focus: focus.focus };
   // A capstone case needs every one of its topics, so it gathers sources from each of them.
   const capstoneIds = item.type === "capstone" ? [...new Set([item.concept_id, ...(item.concept_ids ?? [])])] : [];
   if (capstoneIds.length > 1) {
@@ -235,7 +237,11 @@ async function buildActivity(ctx: Ctx, state: SessionState, index: number): Prom
       .filter((chunk) => !seen.has(chunk.id) && Boolean(seen.add(chunk.id)))
       .slice(0, 6)
       .map((chunk, position) => ({ ...chunk, ref: `S${position + 1}` }));
-    brief = { name: topics.map((topic) => topic.name).join(" + "), summary: `Topics this case combines: ${topics.map((topic) => `${topic.name}: ${topic.summary.slice(0, 160)}`).join(" | ")}` };
+    brief = {
+      name: topics.map((topic) => topic.name).join(" + "),
+      summary: topics.map((topic) => topic.summary.split(/(?<=[.!?])\s/)[0]).join(" "),
+      focus: `Topics this case combines: ${topics.map((topic) => `${topic.name}: ${topic.summary.slice(0, 160)}`).join(" | ")}`,
+    };
   }
   const recentReply = state.roleplay_turns.filter((turn) => turn.role === "learner").at(-1)?.text;
   const input = {
@@ -410,7 +416,7 @@ async function missionSummary(ctx: Ctx, state: SessionState): Promise<MissionSum
     mastery: decayed(masteryMap.get(id) ?? emptyMastery, ctx.config),
   }));
   const mastery = concepts.length ? concepts.reduce((sum, concept) => sum + concept.mastery, 0) / concepts.length : 0;
-  const threshold = ctx.mission.unlock_rule?.min_mastery ?? ctx.config.mastery.unlock_threshold;
+  const threshold = ctx.config.mastery.unlock_threshold;
   return { mission_id: ctx.mission.id, title: ctx.mission.title, mastery, unlocked_next: mastery >= threshold, threshold, xp_earned: state.xp_earned, stars: starsFor(mastery, threshold, ctx.config), concepts };
 }
 
@@ -467,13 +473,14 @@ export async function* runTurn(user: AuthUser, body: TurnRequest, requestId: str
   const [{ config }, { mission, journey }, profileRows] = await Promise.all([
     getActiveConfig(),
     loadMissionContext(body.mission_id, user),
-    supabaseRequest<Array<{ persona: string | null; language_pref: string }>>(`profiles?id=eq.${user.id}&select=persona,language_pref`),
+    supabaseRequest<Array<{ persona: string | null; language_pref: string; onboarding: { prior?: string } | null }>>(`profiles?id=eq.${user.id}&select=persona,language_pref,onboarding`),
   ]);
   const persona = (personas as readonly string[]).includes(profileRows?.[0]?.persona ?? "") ? (profileRows?.[0]?.persona as Persona) : config.learner.default_persona;
   const language: Language = journey.language === "roman_ur" || profileRows?.[0]?.language_pref === "roman_ur" ? "roman_ur" : "en";
+  const prior = profileRows?.[0]?.onboarding?.prior;
   const [concepts, session] = await Promise.all([
     loadConcepts([...mission.concept_ids, ...(mission.activities ?? []).map((item) => item.concept_id)]),
-    getOrCreateSession({ user, mission, journey, config, persona, language, textOnly: persona === "low_bandwidth" || config.ui.text_only_default, practice: body.action === "practice" }),
+    getOrCreateSession({ user, mission, journey, config, persona, language, textOnly: persona === "low_bandwidth" || config.ui.text_only_default, practice: body.action === "practice", prior }),
   ]);
   const ctx: Ctx = { user, requestId, config, journey, mission, concepts };
   const state = session.state;
@@ -508,7 +515,7 @@ export async function* runTurn(user: AuthUser, body: TurnRequest, requestId: str
       await supabaseRequest(`profiles?id=eq.${user.id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ language_pref: body.language }) });
     }
     if (body.action === "set_persona" && body.persona && body.persona !== state.persona) {
-      const fresh = initialPolicyState(body.persona, state.language, config);
+      const fresh = initialPolicyState(body.persona, state.language, config, prior);
       state.persona = body.persona;
       state.difficulty = fresh.difficulty;
       state.pace = fresh.pace;

@@ -50,7 +50,8 @@ export function signalsFor(input: {
     if ((type === "scenario" || type === "crossroads" || type === "roleplay" || type === "capstone") && attempts === 0) signals.push({ signal: "transfer", strength: 1 });
     if (type === "teach_back") signals.push({ signal: "teach_back", strength: 1 });
   } else if (correctness >= 0.4) {
-    signals.push({ signal: "partial", strength: 0.4 });
+    // A partly right answer counts in proportion to how much of it was right.
+    signals.push({ signal: "partial", strength: Math.round(correctness * 100) / 100 });
   } else {
     signals.push({ signal: "wrong", strength: -1 });
   }

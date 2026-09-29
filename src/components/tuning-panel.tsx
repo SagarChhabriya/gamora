@@ -14,7 +14,7 @@ function support(state: TuningState) {
  */
 export function TuningPanel({ state, focus, className }: { state: TuningState | null; focus?: string | null; className?: string }) {
   return (
-    <div className={cx("border border-ink/15 bg-panel p-4", className)}>
+    <div className={cx("border border-ink/15 bg-panel p-4", className)} data-tour="tuning">
       <div className="flex items-baseline justify-between gap-2">
         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/60">Tuning</p>
         <p className="text-[11px] text-ink/50">measured from your answers</p>

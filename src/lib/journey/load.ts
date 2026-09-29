@@ -48,13 +48,13 @@ export async function loadJourneyView(journeyId: string, learnerId: string, conf
       return { id, name: names.get(id) ?? "Concept", mastery: value, label: masteryLabel(value, config) };
     });
     const avg = conceptViews.length ? conceptViews.reduce((sum, concept) => sum + concept.mastery, 0) / conceptViews.length : 0;
-    const threshold = mission.unlock_rule?.min_mastery ?? config.mastery.unlock_threshold;
+    // The live admin setting decides unlocks, so a change applies to journeys planned earlier too.
+    const threshold = config.mastery.unlock_threshold;
     const previous = views[views.length - 1];
     let status: MissionView["status"] = "available";
     let lockReason: string | undefined;
     if (previous) {
-      const prevRow = (missions ?? []).find((row) => row.id === previous.id);
-      const prevThreshold = prevRow?.unlock_rule?.min_mastery ?? config.mastery.unlock_threshold;
+      const prevThreshold = config.mastery.unlock_threshold;
       if (previous.status !== "completed") {
         status = "locked";
         lockReason = `Finish "${previous.title}" first.`;

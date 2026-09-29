@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ActivityCard, Sources, type Submit } from "@/components/activity-card";
 import { AppShell } from "@/components/app-shell";
+import { showNotices } from "@/components/llm-notices";
 import { TuningPanel } from "@/components/tuning-panel";
 import { FeedbackBadge, LessonCard, LevelBar, ListenButton, RateReply, Stars, StepTrail } from "@/components/learning-visuals";
 import { Button, Meter, cx } from "@/components/ui";
@@ -122,6 +123,9 @@ function Mission() {
           speakOut(language === "roman_ur" ? `Mission mukammal. Mastery ${Math.round(event.summary.mastery * 100)} percent.` : `Mission complete. Mastery ${Math.round(event.summary.mastery * 100)} percent.`);
           setCurrent(null);
           setStatus(null);
+          break;
+        case "notice":
+          showNotices([{ kind: event.kind, text: event.text }]);
           break;
         case "error":
           push({ kind: "error", id: nextId(), text: event.message });
@@ -355,7 +359,7 @@ function Mission() {
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_300px]">
-      <section aria-label="Mission conversation" className="min-w-0 space-y-4">
+      <section aria-label="Mission conversation" className="min-w-0 space-y-4" data-tour="mission">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Link href={`/journey/${params.journeyId}`} className="text-sm font-semibold text-ink/60 hover:text-accent">
             ← Journey map
@@ -524,6 +528,7 @@ function Mission() {
 
         {!summary && current && current.activity.type !== "lesson" && (
           <form
+            data-tour="ask"
             className="flex gap-2 border-t border-ink/15 pt-4"
             onSubmit={(event) => {
               event.preventDefault();
@@ -566,7 +571,7 @@ function Mission() {
               🎧 {handsFree.on ? (voice.listening ? "Listening" : "On") : "Hands-free"}
             </Button>
           ) : null}
-          <Button variant="secondary" className="ml-auto px-3" aria-haspopup="dialog" aria-expanded={sheetOpen} onClick={() => setSheetOpen(true)}>
+          <Button variant="secondary" className="ml-auto px-3" data-tour="tuning" aria-haspopup="dialog" aria-expanded={sheetOpen} onClick={() => setSheetOpen(true)}>
             ⚙ Tuning{state ? ` · L${state.difficulty}` : ""}
           </Button>
         </div>

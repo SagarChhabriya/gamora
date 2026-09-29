@@ -19,7 +19,7 @@ type Content = {
   chunk_count: number;
 };
 
-/** Debug view: content, job status, chunks, concepts, and the concept graph edges. */
+/** The source map for Studio: content, job status, passages, topics and the links between them. */
 export async function GET(request: Request, context: RouteContext) {
   const auth = await requireUser(request);
   if (auth.error) return auth.error;

@@ -164,7 +164,8 @@ export async function generateGroundedActivity(
 ): Promise<Activity> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const activity = await generateActivity(input);
-    if (activity.grounded === "verified") return activity;
+    // A step built without the model (quoting the source) needs no second check.
+    if (activity.grounded !== "unverified") return activity;
     const check = await verifyClaims({
       claims: claimsFromActivity(activity),
       chunks: input.chunks,

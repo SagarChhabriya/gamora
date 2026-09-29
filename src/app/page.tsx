@@ -5,7 +5,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { AppShell } from "@/components/app-shell";
+import { showNotices, type NoticeMessage } from "@/components/llm-notices";
 import { RouteChooser } from "@/components/route-chooser";
+import { dismissTour, startTour, tourSeen } from "@/components/tour";
 import { Alert, Button, Eyebrow, Meter } from "@/components/ui";
 import { authFetch } from "@/lib/auth/client";
 import type { LearningRoute } from "@/lib/config/schema";
@@ -20,6 +22,13 @@ function Home({ session }: { session: SessionPayload }) {
   const [library, setLibrary] = useState<Content[]>([]);
   const [building, setBuilding] = useState<string | null>(null);
   const [choosing, setChoosing] = useState<string | null>(null);
+  const [offerTour, setOfferTour] = useState(false);
+
+  useEffect(() => {
+    // Whether the tour was taken is kept in browser storage, readable only after mount.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setOfferTour(!tourSeen());
+  }, []);
   const [error, setError] = useState<string | null>(null);
 
   const [needsProfile, setNeedsProfile] = useState(false);
@@ -54,7 +63,8 @@ function Home({ session }: { session: SessionPayload }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content_id: contentId, route }),
     });
-    const payload = (await response.json()) as { journey_id?: string; error?: string };
+    const payload = (await response.json()) as { journey_id?: string; error?: string; notices?: NoticeMessage[] };
+    showNotices(payload.notices);
     if (payload.journey_id) router.push(`/journey/${payload.journey_id}`);
     else {
       setError(payload.error ?? "Could not plan the journey");
@@ -72,7 +82,7 @@ function Home({ session }: { session: SessionPayload }) {
           <h1 className="mt-3 text-4xl font-semibold leading-[0.95] tracking-[-0.035em] sm:text-6xl">Pick up where you left off.</h1>
         </div>
         <div className="flex gap-2">
-          <Link href="/studio" className="inline-flex min-h-11 items-center bg-ink px-5 text-sm font-semibold text-paper hover:bg-accent">
+          <Link href="/studio" data-tour="add-material" className="inline-flex min-h-11 items-center bg-ink px-5 text-sm font-semibold text-paper hover:bg-accent">
             Add new material
           </Link>
           <Link href="/onboarding" className="inline-flex min-h-11 items-center border border-ink/25 px-5 text-sm font-semibold hover:border-accent">
@@ -82,6 +92,32 @@ function Home({ session }: { session: SessionPayload }) {
       </header>
 
       {error ? <Alert>{error}</Alert> : null}
+      {offerTour ? (
+        <div className="flex flex-col gap-3 border border-accent bg-paper p-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm leading-6">
+            <strong>New here?</strong> Take a two-minute tour of the whole path: add material, build the map and a journey, then learn in missions.
+          </p>
+          <div className="flex shrink-0 gap-2">
+            <Button
+              onClick={() => {
+                setOfferTour(false);
+                startTour();
+              }}
+            >
+              Take the tour
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setOfferTour(false);
+                dismissTour();
+              }}
+            >
+              Not now
+            </Button>
+          </div>
+        </div>
+      ) : null}
       {needsProfile ? (
         <Alert tone="info">
           Tell us a little about you so journeys fit your role and time.{" "}
@@ -91,7 +127,7 @@ function Home({ session }: { session: SessionPayload }) {
         </Alert>
       ) : null}
 
-      <section aria-label="Your journeys" className="space-y-4">
+      <section aria-label="Your journeys" className="space-y-4" data-tour="journeys">
         <h2 className="text-xl font-semibold">Your journeys</h2>
         {journeys === null ? (
           <p className="text-ink/60">Loading...</p>

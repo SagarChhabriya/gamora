@@ -50,6 +50,13 @@ describe("topic cap", () => {
     expect(new Set(placed).size).toBe(10);
   });
 
+  it("merges repeated ideas into one key point with all their sources", () => {
+    const repeated = [unit(0), { ...unit(1), name: "idea number 0" }, unit(2)];
+    const topics = deterministicTopics(repeated, 1);
+    expect(topics[0].key_points.map((point) => point.name)).toEqual(["Idea number 0", "Idea number 2"]);
+    expect(topics[0].key_points[0].source_chunk_ids).toEqual(["c0", "c1"]);
+  });
+
   it("merges extra topics until the cap holds", () => {
     const list = units(8);
     const topics = sanitizeGroups({ topics: list.map((item, index) => ({ name: `Topic about part ${index}`, summary: "One idea.", members: [index] })) }, list, 3);
@@ -94,8 +101,15 @@ describe("step focus inside a topic", () => {
     ],
   };
 
-  it("names every key point in the lesson", () => {
-    expect(stepFocus(topic, 0, true).summary).toContain("Saving; Spending");
+  it("names the key points to the model, never in what the learner sees", () => {
+    const lesson = stepFocus(topic, 0, true);
+    expect(lesson.focus).toContain("Saving; Spending");
+    expect(lesson.summary).toBe("How money moves.");
+  });
+
+  it("lists at most six distinct key point names", () => {
+    const many = { ...topic, key_points: Array.from({ length: 20 }, (_, index) => ({ name: index % 2 ? "Repeated idea" : `Idea ${index}`, summary: "s", difficulty: 2, source_chunk_ids: [] })) };
+    expect(stepFocus(many, 0, true).focus).toMatch(/and 5 more\.$/);
   });
 
   it("takes key points in turn for practice, with their sources first", () => {
@@ -105,6 +119,6 @@ describe("step focus inside a topic", () => {
   });
 
   it("leaves an ungrouped concept as it is", () => {
-    expect(stepFocus({ ...topic, key_points: [] }, 3, false)).toEqual({ summary: "How money moves.", query: "Money basics", chunkIds: ["c1", "c2", "c3"] });
+    expect(stepFocus({ ...topic, key_points: [] }, 3, false)).toEqual({ summary: "How money moves.", focus: undefined, query: "Money basics", chunkIds: ["c1", "c2", "c3"] });
   });
 });

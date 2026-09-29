@@ -114,11 +114,17 @@ export function htmlToText(html: string) {
   let source = html.replace(/<!--[\s\S]*?-->/g, " ");
   const main = source.match(/<(main|article)\b[^>]*>([\s\S]*?)<\/\1>/i)?.[2];
   if (main && main.replace(/<[^>]+>/g, "").trim().length > 400) source = main;
-  return source
-    .replace(/<(script|style|noscript|svg|head|nav|footer|header|form|template|iframe)\b[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<(br|\/p|\/div|\/li|\/h[1-6]|\/tr|\/section|\/article)\b[^>]*>/gi, "\n")
-    .replace(/<li\b[^>]*>/gi, "\n- ")
-    .replace(/<[^>]+>/g, " ")
+  // A tag, reading quoted attribute values whole: wiki pages put JSON with ">" inside attributes.
+  const tag = String.raw`(?:[^>"']|"[^"]*"|'[^']*')*`;
+  const text = source
+    .replace(/<(script|style|noscript|svg|head|nav|footer|header|form|template|iframe|math)\b[\s\S]*?<\/\1>/gi, " ")
+    // Citation markers and reference lists are not teaching text.
+    .replace(new RegExp(`<sup\\b${tag}class=(["'])[^"']*reference[^"']*\\1${tag}>[\\s\\S]*?</sup>`, "gi"), " ")
+    .replace(new RegExp(`<(ol|ul|div)\\b${tag}class=(["'])[^"']*(references|reflist|navbox|mw-references)[^"']*\\2${tag}>[\\s\\S]*?</\\1>`, "gi"), " ")
+    .replace(new RegExp(`<(br|/p|/div|/li|/h[1-6]|/tr|/section|/article)\\b${tag}>`, "gi"), "\n")
+    .replace(new RegExp(`<li\\b${tag}>`, "gi"), "\n- ")
+    .replace(new RegExp(`<${tag}>`, "g"), " ");
+  return text
     .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, code: string) => {
       if (code.startsWith("#x")) return String.fromCodePoint(parseInt(code.slice(2), 16));
       if (code.startsWith("#")) return String.fromCodePoint(Number(code.slice(1)));
@@ -127,7 +133,16 @@ export function htmlToText(html: string) {
     .replace(/[ \t]+/g, " ")
     .replace(/\s*\n\s*/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
+    .split("\n")
+    .filter((line) => !looksLikeData(line))
+    .join("\n")
     .trim();
+}
+
+/** A line of leftover page data (JSON, template parameters) rather than readable text. */
+export function looksLikeData(line: string) {
+  const marks = (line.match(/":|\{"|"\}|\\n/g) ?? []).length;
+  return marks >= 3 && marks * 12 > line.length / 4;
 }
 
 /**

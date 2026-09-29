@@ -1,6 +1,7 @@
 import { after, NextResponse } from "next/server";
 
 import { requireUser } from "@/lib/auth/server";
+import { noticeText, withLlmNotices } from "@/lib/llm/notices";
 import { logEvent } from "@/lib/observability/events";
 import { getOrCreateRequestId } from "@/lib/observability/request-id";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
@@ -31,7 +32,13 @@ export async function POST(request: Request) {
     async start(controller) {
       const send = (event: unknown) => controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
       try {
-        for await (const event of runTurn(user, body, requestId)) send(event);
+        // A busy or failing AI service is reported as it happens, so a slow reply is never a silent one.
+        await withLlmNotices(
+          async () => {
+            for await (const event of runTurn(user, body, requestId)) send(event);
+          },
+          (notice) => send({ type: "notice", kind: notice, text: noticeText[notice] }),
+        );
       } catch (error) {
         const known = error instanceof TurnError;
         if (!known) reportError(error, { requestId, userHash: user.userHash, area: "tutor.turn", extra: { action: body.action } });

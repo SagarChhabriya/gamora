@@ -45,7 +45,8 @@ const difficultyText = (level: number) =>
 
 export type ActivityInput = {
   type: StepType;
-  concept: { id: string; name: string; summary: string };
+  /** summary is what a learner may see; focus is extra guidance for the model only. */
+  concept: { id: string; name: string; summary: string; focus?: string };
   chunks: SourceChunk[];
   difficulty: number;
   pace: Pace;
@@ -89,7 +90,7 @@ async function generateActivityOnce(input: ActivityInput & { type: PlanStepType 
       { role: "system", content: tutorSystemPrompt({ config, persona: input.persona, language: input.language, pace: input.pace }) },
       {
         role: "user",
-        content: `Create a ${type} activity for the concept "${concept.name}" (${concept.summary.slice(0, 450)}).
+        content: `Create a ${type} activity for the concept "${concept.name}" (${concept.summary.slice(0, 300)}${concept.focus ? ` ${concept.focus.slice(0, 400)}` : ""}).
 Difficulty ${input.difficulty}/5: ${difficultyText(input.difficulty)}. Pace: ${input.pace}. ${input.intent ? `Intent: ${input.intent}.` : ""}
 ${input.workedExample ? "The learner struggled just now. Start display_text with a short worked example from the source before the question.\n" : ""}${input.learnerContext ? `Learner context (reuse their words when helpful): ${input.learnerContext.slice(0, 300)}\n` : ""}${input.storyContext ? `${input.storyContext}\n` : ""}${input.carryOver ? `Continue from the learner's last decision. What it led to: ${input.carryOver.slice(0, 400)} Open display_text by picking up from that outcome, then set the new situation.\n` : ""}
 ${shapes[type]}
@@ -139,7 +140,7 @@ async function generateLesson(input: ActivityInput, retry: boolean): Promise<Act
     task: "fast",
     model: process.env.LLM_FAST_MODEL ?? "",
     jsonMode: true,
-    maxTokens: 2_000,
+    maxTokens: 1_500,
     timeoutMs: 15_000,
     temperature: 0.4,
     purpose: "activity.lesson",
@@ -149,7 +150,7 @@ async function generateLesson(input: ActivityInput, retry: boolean): Promise<Act
       { role: "system", content: tutorSystemPrompt({ config, persona: input.persona, language: input.language, pace: input.pace }) },
       {
         role: "user",
-        content: `Teach the concept "${concept.name}" (${concept.summary.slice(0, 450)}) as a short visual lesson. This comes BEFORE any question, so teach, do not ask.
+        content: `Teach the concept "${concept.name}" (${concept.summary.slice(0, 300)}${concept.focus ? ` ${concept.focus.slice(0, 400)}` : ""}) as a short visual lesson. This comes BEFORE any question, so teach, do not ask.
 Difficulty ${input.difficulty}/5: ${difficultyText(input.difficulty)}.
 ${input.storyContext ? `${input.storyContext} The example may feature these people.\n` : ""}Return JSON: {"title": 3 to 6 words, "key_idea": one sentence with the single most important idea, "notes": 2 to 4 sticky notes, each a fact a beginner must remember in at most 14 words, "flow": if the source describes a process, sequence or cause and effect, 3 to 5 short step labels in order (at most 8 words each), otherwise [], "example": one short concrete example from the source context in at most 40 words, "source_refs": ["S1"], ${visualPromptShape}}.
 Never invent a number, date or comparison the source does not state.
@@ -232,7 +233,8 @@ function buildActivity(input: ActivityInput & { type: PlanStepType }, raw: Recor
 export function fallbackActivity(input: ActivityInput): Activity {
   const { concept, chunks, language } = input;
   const ur = language === "roman_ur";
-  const sentences = chunks[0]?.text.split(/(?<=[.!?])\s+/) ?? [];
+  // Only sentences that read like prose: citation data, markup or tables never reach the learner.
+  const sentences = chunks.flatMap((chunk) => chunk.text.split(/(?<=[.!?])\s+/)).filter(isProse).slice(0, 4);
   const excerpt = sentences.length ? sentences.slice(0, 2).join(" ") : concept.summary;
   if (input.type === "lesson") {
     return {
@@ -247,7 +249,8 @@ export function fallbackActivity(input: ActivityInput): Activity {
       hints: [],
       expected_points: [],
       source_chunk_ids: chunks.slice(0, 2).map((chunk) => chunk.id),
-      grounded: "verified",
+      // Built without the model: it quotes the source, so it is labelled that way.
+      grounded: "abstained",
       lesson: { key_idea: concept.summary, notes: (sentences.length ? sentences.slice(0, 3) : [concept.summary]).map((text) => text.slice(0, 200)), flow: [], example: "" },
     };
   }
@@ -270,8 +273,17 @@ export function fallbackActivity(input: ActivityInput): Activity {
     hints: [ur ? "Source ki pehli line dobara parhein." : "Re-read the first line of the source.", concept.summary.slice(0, 200)],
     expected_points: [{ text: concept.summary.slice(0, 300), refs: chunks[0] ? [chunks[0].ref] : [] }],
     source_chunk_ids: chunks.slice(0, 2).map((chunk) => chunk.id),
-    grounded: "verified",
+    grounded: "abstained",
   };
+}
+
+/** True for a sentence of ordinary prose: mostly letters, a sensible length, no data or markup. */
+export function isProse(sentence: string) {
+  const text = sentence.trim();
+  if (text.length < 20 || text.length > 400) return false;
+  if (/[{}<>]|":|\bhttps?:|\bwww\./.test(text)) return false;
+  const letters = (text.match(/\p{L}/gu) ?? []).length;
+  return letters / text.replace(/\s/g, "").length >= 0.7;
 }
 
 function shuffle<T>(items: T[]) {

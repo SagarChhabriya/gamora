@@ -87,3 +87,18 @@ describe("concept plan sanitizing", () => {
     expect(plan.edges).toEqual([]);
   });
 });
+
+describe("wiki pages", () => {
+  it("keeps prose and drops citation data hidden in attributes", async () => {
+    const { htmlToText } = await import("@/lib/ingest/parse");
+    const html = `<html><body><main><p>Machine learning builds models from data.<sup class="reference" data-mw='{"parts":[{"template":{"target":{"wt":"Cite book"}}}]}'><a href="#cite">[1]</a></sup> It learns patterns.</p>
+<span typeof="mw:Transclusion" data-mw='{"parts":[{"template":{"target":{"wt":"Cite web","href":"./T"},"params":{"last":{"wt":"Mitchell"},"date":{"wt":"16 July 2015 > 2014"}}}}]}'></span>
+<p>Models are tested on new examples.</p>
+<ol class="references"><li>Mitchell, T. (1997). Machine Learning.</li></ol>
+${"<p>Padding sentence that keeps the main section long enough to be chosen. </p>".repeat(8)}</main></body></html>`;
+    const text = htmlToText(html);
+    expect(text).toContain("Machine learning builds models from data.");
+    expect(text).toContain("Models are tested on new examples.");
+    expect(text).not.toMatch(/wt"|Cite web|Mitchell|\[1\]/);
+  });
+});

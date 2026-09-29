@@ -88,7 +88,7 @@ export function ActivityCard({
           ❓ {typeLabels[activity.type] ?? activity.type} / step {position.index + 1} of {position.total}
         </span>
         <span className="text-ink/55">
-          Level {activity.difficulty} / {groundingLabels[activity.grounded]}
+          Challenge {activity.difficulty}/5 / {groundingLabels[activity.grounded]}
         </span>
       </div>
       <div className="mt-3 flex items-start justify-between gap-3">

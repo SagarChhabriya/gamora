@@ -433,7 +433,7 @@ function CauseChain({ links }: { links: string[] }) {
 function BranchTree({ root, leaves }: { root: string; leaves: string[] }) {
   return (
     <div className="flex flex-col items-center">
-      <p className="max-w-md border-2 border-ink bg-paper px-4 py-2 text-center text-sm font-semibold">{root}</p>
+      <p className="line-clamp-4 max-w-md border-2 border-ink bg-paper px-4 py-2 text-center text-sm font-semibold">{root}</p>
       <span aria-hidden="true" className="h-4 w-0.5 bg-ink/30" />
       <ul className="grid w-full gap-3 border-t-2 border-ink/30 pt-4 sm:grid-cols-2 lg:grid-cols-4">
         {leaves.map((leaf, index) => (

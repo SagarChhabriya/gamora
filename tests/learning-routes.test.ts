@@ -115,3 +115,54 @@ describe("crossroads", () => {
     expect(applyRewards(emptyGamification, { signals: [{ signal: "correct" }], activityType: "crossroads" }, defaultConfig).newBadges).toContain("pathfinder");
   });
 });
+
+describe("starting challenge level", () => {
+  it("follows familiarity, not time or connection", async () => {
+    const { startingLevel, initialPolicyState } = await import("@/lib/tutor/policy");
+    expect(startingLevel("low_bandwidth", "new", defaultConfig)).toBe(defaultConfig.learner.default_level);
+    expect(startingLevel("busy_rm", "some", defaultConfig)).toBe(defaultConfig.learner.default_level + 1);
+    expect(startingLevel("new_joiner", "confident", defaultConfig)).toBe(4);
+    expect(startingLevel("low_bandwidth", undefined, defaultConfig)).toBe(defaultConfig.learner.default_level);
+    expect(startingLevel("expert", undefined, defaultConfig)).toBe(4);
+    expect(initialPolicyState("busy_rm", "en", defaultConfig, "new").difficulty).toBe(defaultConfig.learner.default_level);
+  });
+});
+
+describe("busy AI notices", () => {
+  it("reports each kind once per request and nothing outside one", async () => {
+    const { reportLlm, withLlmNotices, noticeMessages } = await import("@/lib/llm/notices");
+    reportLlm("busy");
+    const heard: string[] = [];
+    const { result, notices } = await withLlmNotices(async () => {
+      reportLlm("busy");
+      await Promise.resolve();
+      reportLlm("busy");
+      reportLlm("unavailable");
+      return 7;
+    }, (notice) => heard.push(notice));
+    expect(result).toBe(7);
+    expect(heard).toEqual(["busy", "unavailable"]);
+    expect(noticeMessages(notices).map((item) => item.kind)).toEqual(["unavailable"]);
+  });
+});
+
+describe("tour", () => {
+  it("knows which page a step belongs to", async () => {
+    const { pageOf, tourSteps } = await import("@/lib/tour/steps");
+    expect(pageOf("/")).toBe("home");
+    expect(pageOf("/studio")).toBe("studio");
+    expect(pageOf("/journey/abc")).toBe("journey");
+    expect(pageOf("/journey/abc/mission/def")).toBe("mission");
+    expect(pageOf("/journey/abc/storyboard")).toBe("any");
+    expect(new Set(tourSteps.map((step) => step.id)).size).toBe(tourSteps.length);
+  });
+});
+
+describe("fallback steps read like prose", () => {
+  it("drops citation data and markup", async () => {
+    const { isProse } = await import("@/lib/tutor/activity");
+    expect(isProse("Gradient descent moves against the gradient to reduce the loss.")).toBe(true);
+    expect(isProse('"last2":{"wt":"Mitchell"},"first2":{"wt":"T. M."}')).toBe(false);
+    expect(isProse("See https://example.com for more on this topic.")).toBe(false);
+  });
+});

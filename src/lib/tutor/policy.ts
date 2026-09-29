@@ -120,9 +120,22 @@ export function decide(input: PolicyInput): PolicyDecision {
   return { difficulty, pace, modality, language, worked_example: workedExample, override, revisit, reasons };
 }
 
-/** Starting state for a persona. */
-export function initialPolicyState(persona: Persona, language: Language, config: AppConfig): PolicyState {
-  const base = persona === "expert" ? 4 : persona === "new_joiner" ? config.learner.default_level : 3;
+/**
+ * Where the challenge starts. It follows how familiar the learner said they are with the material,
+ * not their time or connection: "Short on time" and "Slow connection" change pace and format only.
+ * Brand new starts at the admin's default level, knowing some of it one above, knowing it well at 4.
+ * Without an answer, Experienced starts at 4 and everyone else at the default.
+ */
+export function startingLevel(persona: Persona, prior: string | undefined, config: AppConfig) {
+  if (prior === "confident") return 4;
+  if (prior === "some") return config.learner.default_level + 1;
+  if (prior === "new") return config.learner.default_level;
+  return persona === "expert" ? 4 : config.learner.default_level;
+}
+
+/** Starting state for a learner. */
+export function initialPolicyState(persona: Persona, language: Language, config: AppConfig, prior?: string): PolicyState {
+  const base = startingLevel(persona, prior, config);
   return {
     difficulty: clamp(base, config),
     pace: persona === "busy_rm" || persona === "low_bandwidth" ? "brisk" : "normal",

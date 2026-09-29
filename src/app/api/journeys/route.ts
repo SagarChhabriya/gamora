@@ -4,6 +4,7 @@ import { z } from "zod";
 import { requireUser } from "@/lib/auth/server";
 import { getActiveConfig } from "@/lib/config/active";
 import { learningRoutes, personas, type Persona } from "@/lib/config/schema";
+import { noticeMessages, withLlmNotices } from "@/lib/llm/notices";
 import { logEvent } from "@/lib/observability/events";
 import { getOrCreateRequestId } from "@/lib/observability/request-id";
 import { planJourney } from "@/lib/planner/plan";
@@ -78,7 +79,7 @@ export async function POST(request: Request) {
     const persona: Persona = (personas as readonly string[]).includes(profile?.persona ?? "") ? (profile?.persona as Persona) : active.config.learner.default_persona;
     const language = profile?.language_pref === "roman_ur" && active.config.language.allowed.includes("roman_ur") ? "roman_ur" : active.config.language.default;
 
-    const plan = await planJourney({
+    const { result: plan, notices } = await withLlmNotices(() => planJourney({
       title: content.title,
       concepts,
       edges,
@@ -95,7 +96,7 @@ export async function POST(request: Request) {
       configVersion: active.version,
       requestId,
       userHash: auth.user.userHash,
-    });
+    }));
 
     const journeys = await supabaseRequest<Array<{ id: string }>>("journeys?select=id", {
       method: "POST",
@@ -142,7 +143,7 @@ export async function POST(request: Request) {
         if (journey) await ensureStoryboard({ journey, config: active.config, requestId, userHash: auth.user.userHash }).catch(() => undefined);
       });
     }
-    return NextResponse.json({ journey_id: journeyId, planner: plan.planner }, { status: 201 });
+    return NextResponse.json({ journey_id: journeyId, planner: plan.planner, notices: noticeMessages(notices) }, { status: 201 });
   } catch (error) {
     reportError(error, { requestId, userHash: auth.user.userHash, area: "journey.plan" });
     await logEvent({ request_id: requestId, user_hash: auth.user.userHash, type: "journey.created", ok: false, payload: { error: error instanceof Error ? error.message.slice(0, 200) : "unknown" } });
