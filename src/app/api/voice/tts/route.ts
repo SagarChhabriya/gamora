@@ -35,7 +35,7 @@ export async function POST(request: Request) {
   const model = process.env.LLM_TTS_MODEL ?? "gemini-3.8-flash-lite-tts";
   const started = Date.now();
   try {
-    const speech = await synthesiseSpeech({ text: parsed.data.text.replace(/[*_#>`]/g, ""), language: parsed.data.language, voice: config.voice.cloud_voice, model });
+    const speech = await synthesiseSpeech({ text: parsed.data.text.replace(/[*_#>`]/g, ""), voice: config.voice.cloud_voice, model });
     await logEvent({
       request_id: requestId,
       user_hash: auth.user.userHash,

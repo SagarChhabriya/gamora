@@ -61,18 +61,15 @@ export function pcmToWav(pcm: Buffer, rate = 24_000) {
 }
 
 /**
- * Speech for a tutor line. Roman Urdu is read with Urdu pronunciation and English terms stay
- * English, which is how Pakistani learners code-switch. The direction line is not spoken.
+ * Speech for a tutor line. Only the line itself is sent: in tests on 2026-10-05 the TTS models
+ * read any style direction aloud ("Say warmly, ..."), while plain Roman Urdu text already came
+ * back with Urdu pronunciation and English terms kept in English.
  */
-export async function synthesiseSpeech(input: { text: string; language: "en" | "roman_ur"; voice: string; model: string }) {
-  const direction =
-    input.language === "roman_ur"
-      ? "Read this aloud as a warm, clear Pakistani tutor. It is Urdu written in Latin letters, mixed with English terms: pronounce the Urdu words as a native Urdu speaker and keep English terms in English"
-      : "Read this aloud as a warm, clear Pakistani tutor speaking English";
+export async function synthesiseSpeech(input: { text: string; voice: string; model: string }) {
   const data = await generateMedia(
     input.model,
     {
-      contents: [{ parts: [{ text: `${direction}: ${input.text}` }] }],
+      contents: [{ parts: [{ text: input.text }] }],
       generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: input.voice } } } },
     },
     25_000,
