@@ -129,11 +129,11 @@ type CallContext = { requestId?: string; userHash?: string; skipProviders?: stri
 /** Groups units into at most `cap` topics. Short sources pass through unchanged. */
 export async function groupIntoTopics(units: TopicUnit[], cap: number, context: CallContext = {}): Promise<{ topics: Topic[]; grouper: "none" | "llm" | "fallback" }> {
   if (units.length <= cap) return { topics: units.map((unit) => topicFrom([unit])), grouper: "none" };
-  // Keep the prompt inside small free-tier limits: short summaries, and a hard ceiling on units.
+  // Keep the prompt a sensible size: short summaries, and a hard ceiling on units.
   const list = units
     .slice(0, 300)
-    // Free tiers refuse requests over about 8,000 tokens, so long lists send names only.
-    .map((unit, index) => (units.length > 90 ? `${index}. ${unit.name.slice(0, 70)}` : `${index}. ${unit.name}: ${unit.summary.replace(/\s+/g, " ").slice(0, 110)}`))
+    // Very long lists send names only, which also keeps the request inside the free fallback providers' limits.
+    .map((unit, index) => (units.length > 200 ? `${index}. ${unit.name.slice(0, 70)}` : `${index}. ${unit.name}: ${unit.summary.replace(/\s+/g, " ").slice(0, 110)}`))
     .join("\n");
   try {
     const response = await generateWithFallback({

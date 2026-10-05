@@ -165,9 +165,20 @@ function AdminDashboard() {
                 <StatTile label="Turn latency p50 / p95" value={`${ms(d.usage.turn_p50_ms)} / ${ms(d.usage.turn_p95_ms)}`} />
                 <StatTile label="LLM latency p50 / p95" value={`${ms(d.usage.llm_p50_ms)} / ${ms(d.usage.llm_p95_ms)}`} />
                 <StatTile label="LLM calls" value={d.usage.llm_calls} hint={`${d.usage.llm_errors} errors, ${d.usage.fallback_calls} served by fallback, ${d.usage.cached_calls} cached`} />
-                <StatTile label="Tokens / est. cost" value={`${Math.round((d.usage.tokens_in + d.usage.tokens_out) / 1000)}k`} hint={`$${d.usage.est_cost_usd.toFixed(3)} at paid rates. Free tier: $0.`} />
+                <StatTile label="Tokens / est. cost" value={`${Math.round((d.usage.tokens_in + d.usage.tokens_out) / 1000)}k`} hint={`$${d.usage.est_cost_usd.toFixed(3)} at list price (paid Groq tier).`} />
               </section>
               <BarList label="Provider mix" rows={d.usage.providers.map((row) => ({ label: row.provider, value: row.calls }))} />
+              <section aria-label="Voice and images" className="grid grid-cols-2 gap-3">
+                <StatTile label="Cloud voice clips" value={d.usage.tts_clips} hint={`$${d.usage.tts_cost_usd.toFixed(3)} at list price. ${d.usage.tts_fallbacks} fell back to the device voice.`} />
+                <StatTile label="Images made" value={d.usage.images_made} hint={`$${d.usage.image_cost_usd.toFixed(2)} at list price, shared by every learner of a source. ${d.usage.images_failed} failed.`} />
+              </section>
+            </Section>
+            <Section title="Re-engagement" filters={filters} note="Nudges come from the daily job when topics fade, within the cadence set in Configuration. A review counts when the learner starts it from the home card.">
+              <section aria-label="Nudges" className="grid grid-cols-2 gap-3">
+                <StatTile label="Nudges sent / seen" value={`${d.engagement.nudges_sent} / ${d.engagement.nudges_seen}`} />
+                <StatTile label="Reviews started" value={d.engagement.reviews_started} hint={`${d.engagement.reviews_from_nudge} after a nudge, ${d.engagement.dismissed} cards put off for later`} />
+                <StatTile label="Nudge to review rate" value={pct(d.engagement.nudge_return_rate)} hint="The share of nudges that brought a learner back into a review." />
+              </section>
             </Section>
             <Section title="Grounding and system health" table="events" filters={filters}>
               <dl className="grid grid-cols-2 gap-3 text-sm">

@@ -153,6 +153,11 @@ export function StoryboardPlayer({ storyboard, startHref, onFinish, speak, silen
               </div>
               <div className="flex min-w-0 flex-col justify-between gap-5 border-b border-ink/15 p-4 sm:p-6 lg:border-b-0">
                 <div>
+                  {panel.image_url ? (
+                    // Signed, short-lived storage links: next/image would cache them past their expiry.
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={panel.image_url} alt={panel.image?.alt ?? ""} className="mb-4 aspect-[3/2] w-full border border-ink/15 bg-paper object-cover" />
+                  ) : null}
                   {index === 0 && storyboard.cast.length ? (
                     <ul className="mb-4 flex flex-wrap gap-2" aria-label="People in this story">
                       {storyboard.cast.map((person) => (

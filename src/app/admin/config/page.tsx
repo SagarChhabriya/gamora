@@ -6,7 +6,7 @@ import { AdminNav } from "@/components/admin-nav";
 import { AppShell } from "@/components/app-shell";
 import { Alert, Button, Card, Eyebrow, Textarea, cx } from "@/components/ui";
 import { authFetch } from "@/lib/auth/client";
-import { activityTypes, personaLabels, personas, type AppConfig } from "@/lib/config/schema";
+import { activityTypes, cloudVoices, personaLabels, personas, type AppConfig } from "@/lib/config/schema";
 
 type Version = { version: number; note: string | null; is_active: boolean; created_at: string; author: string; diff: Array<{ path: string; from: unknown; to: unknown }> };
 type Payload = { active: AppConfig; active_version: number; defaults: AppConfig; versions: Version[] };
@@ -70,6 +70,29 @@ const groups: Array<{ title: string; description: string; fields: Field[] }> = [
     ],
   },
   {
+    title: "Voice and media",
+    description: "How the guide sounds and whether storyboards get illustrations. Costs are shown on the dashboard.",
+    fields: [
+      { path: "voice.engine", label: "Voice for read aloud", kind: "select", options: ["cloud", "browser"], labels: { cloud: "Cloud voice (Urdu and English)", browser: "Device voice only" }, hint: "The cloud voice falls back to the device voice when it is busy." },
+      { path: "voice.cloud_voice", label: "Cloud voice", kind: "select", options: [...cloudVoices] },
+      { path: "media.images", label: "Illustrated storyboard panels", kind: "toggle", hint: "Made once per topic and shared by every learner of that source. Needs billing on the Gemini key." },
+      { path: "media.image_tier", label: "Image quality tier", kind: "select", options: ["economy", "standard"], labels: { economy: "Economy (about $0.03 per image)", standard: "Standard (about $0.045 per image)" } },
+      { path: "media.monthly_budget_usd", label: "Monthly image budget (USD)", kind: "number", min: 0, max: 500, step: 1, hint: "New images stop when the month's spend reaches this. Panels keep their drawn views." },
+      { path: "media.max_images_per_source", label: "Most images per source", kind: "number", min: 0, max: 40 },
+    ],
+  },
+  {
+    title: "Re-engagement",
+    description: "When learners are invited back to review topics that are fading.",
+    fields: [
+      { path: "engagement.nudges", label: "Review nudges", kind: "toggle" },
+      { path: "engagement.review_after_days", label: "Topic is due for review after (days)", kind: "number", min: 1, max: 30 },
+      { path: "engagement.cadence_days", label: "Days between nudges", kind: "number", min: 1, max: 14 },
+      { path: "engagement.max_per_week", label: "Most nudges in 7 days", kind: "number", min: 0, max: 7 },
+      { path: "engagement.review_size", label: "Topics in one review", kind: "number", min: 1, max: 8 },
+    ],
+  },
+  {
     title: "Sources",
     description: "How long material is broken into topics.",
     fields: [
@@ -100,6 +123,14 @@ const groups: Array<{ title: string; description: string; fields: Field[] }> = [
         label: "Websites allowed for URL sources",
         kind: "list",
         hint: "Comma separated. A domain includes its subdomains. Leave empty to allow any public site.",
+      },
+      {
+        path: "safety.injection_strictness",
+        label: "Hidden-instruction check on sources",
+        kind: "select",
+        options: ["standard", "strict"],
+        labels: { standard: "Standard: remove the flagged passages", strict: "Strict: refuse the whole source" },
+        hint: "A classifier reads every source for text addressed to the AI. Instructions for human readers and material that teaches about such attacks are allowed.",
       },
       { path: "safety.tutor_rpm", label: "Tutor requests per minute per learner", kind: "number", min: 5, max: 120 },
       { path: "ui.text_only_default", label: "Start learners in text only mode", kind: "toggle" },

@@ -14,7 +14,7 @@ import { authFetch } from "@/lib/auth/client";
 import type { LearningRoute } from "@/lib/config/schema";
 import { isAllowedHost } from "@/lib/ingest/security";
 
-type Mode = "text" | "url" | "file";
+type Mode = "topic" | "text" | "url" | "file";
 type Job = { id: string; content_id: string; step: string; status: string; progress: number; error: string | null; batch: number | null; batches: number | null };
 type SourceMap = {
   content: { id: string; title: string; status: string; language: string | null; chunk_count: number; topic_cap: number | null };
@@ -26,6 +26,7 @@ type SourceMap = {
 type ContentRow = { id: string; title: string; status: string; language: string | null; chunk_count: number; created_at: string; journey_id: string | null; mine: boolean; shared: boolean; topic_cap: number | null };
 
 const modes: Array<{ id: Mode; label: string; hint: string }> = [
+  { id: "topic", label: "Topic", hint: "No material? Name a topic and say what you need. Gamora writes a primer, clearly labelled as AI-written, and builds from it." },
   { id: "text", label: "Paste text", hint: "Drop in notes, an article, or a chapter." },
   { id: "url", label: "Use a URL", hint: "Fetch a public web page from a supported site." },
   { id: "file", label: "Upload file", hint: "PDF, DOCX, TXT, or Markdown up to 10 MB." },
@@ -154,11 +155,11 @@ function Studio() {
         init = {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title, ...(mode === "text" ? { text } : { url }) }),
+          body: JSON.stringify({ title, ...(mode === "text" ? { text } : mode === "topic" ? { topic: text } : { url }) }),
         };
       }
       const response = await authFetch("/api/ingest", init);
-      const payload = (await response.json().catch(() => ({}))) as { content_id?: string; job?: Job; error?: string; injection_flags?: string[]; duplicate?: boolean };
+      const payload = (await response.json().catch(() => ({}))) as { content_id?: string; job?: Job; error?: string; injection_flags?: string[]; duplicate?: boolean; warning?: string };
       if (!response.ok || !payload.content_id || !payload.job) {
         throw new Error(
           payload.injection_flags?.length
@@ -169,6 +170,7 @@ function Studio() {
       setUploading(false);
       setJob(payload.job);
       if (payload.duplicate) toast.show("You already added this material, so the existing map is reused.", "info");
+      if (payload.warning) toast.show(payload.warning, "info");
       await runSteps(payload.content_id, started);
       await loadSourceMap(payload.content_id);
       await loadContents();
@@ -276,7 +278,7 @@ function Studio() {
             <Field label="Source title">
               <Input value={title} onChange={(event) => setTitle(event.target.value)} required maxLength={200} placeholder="e.g. Photosynthesis, chapter 3" />
             </Field>
-            <div className="grid grid-cols-3 border-b border-ink/20" role="tablist" aria-label="Source type">
+            <div className="grid grid-cols-2 border-b border-ink/20 sm:grid-cols-4" role="tablist" aria-label="Source type">
               {modes.map((item) => (
                 <button
                   type="button"
@@ -294,6 +296,18 @@ function Studio() {
               ))}
             </div>
             <p className="text-sm text-ink/60">{modes.find((item) => item.id === mode)?.hint}</p>
+            {mode === "topic" && (
+              <Textarea
+                aria-label="What you want to learn"
+                value={text}
+                onChange={(event) => setText(event.target.value)}
+                required
+                minLength={3}
+                maxLength={1500}
+                rows={4}
+                placeholder="e.g. The basics of personal budgeting for my first job: needs vs wants, saving a share of each salary, and avoiding expensive debt. Beginner level."
+              />
+            )}
             {mode === "text" && (
               <Textarea aria-label="Source text" value={text} onChange={(event) => setText(event.target.value)} required rows={8} placeholder="Paste the source material here..." />
             )}

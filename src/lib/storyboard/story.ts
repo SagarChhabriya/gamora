@@ -13,6 +13,9 @@ export type StoryPanel = {
   source: ViewSource;
   quote: string;
   source_label: string;
+  /** Generated illustration in the private media bucket. image_url is a short-lived signed link added when served. */
+  image?: { path: string; alt: string };
+  image_url?: string;
 };
 
 export type Storyboard = {
@@ -24,7 +27,15 @@ export type Storyboard = {
   language: "en" | "roman_ur";
   generator: "llm" | "fallback";
   created_at: string;
+  /** Last time illustrations were attempted, so a refused attempt (budget, billing) is not retried on every view. */
+  illustrated_at?: string;
 };
+
+/** True when illustrations are on, some panel lacks one, and the last attempt was over an hour ago. */
+export function needsIllustration(storyboard: Pick<Storyboard, "panels" | "illustrated_at">, imagesOn: boolean, now = Date.now()) {
+  if (!imagesOn || storyboard.panels.every((panel) => panel.image)) return false;
+  return !storyboard.illustrated_at || now - new Date(storyboard.illustrated_at).getTime() > 3_600_000;
+}
 
 function normalise(text: string) {
   return text

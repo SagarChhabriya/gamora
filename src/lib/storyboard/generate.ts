@@ -5,6 +5,7 @@ import { kvDel, kvGet, kvSet } from "@/lib/llm/cache";
 import { parseLenient, repairJson } from "@/lib/llm/json";
 import { romanUrduStyleGuide } from "@/lib/llm/prompts/roman-urdu";
 import { generateWithFallback } from "@/lib/llm/router";
+import { illustrateTopics, signedImageUrls } from "@/lib/media/images";
 import { logEvent } from "@/lib/observability/events";
 import { firstSentence, numbersStated, panelView, quoteInSource, varyViews, type StoryPanel, type Storyboard } from "@/lib/storyboard/story";
 import { supabaseRequest } from "@/lib/supabase/server";
@@ -220,6 +221,46 @@ export async function ensureStoryboard(input: { journey: JourneyRow; config: App
   } finally {
     await kvDel(lock);
   }
+}
+
+/**
+ * Adds generated illustrations to a journey's storyboard panels. Images belong to topics, not to
+ * the journey, so a second learner of the same source gets them at no cost. Panels without an
+ * image keep their drawn views.
+ */
+export async function illustrateStoryboard(input: { journeyId: string; config: AppConfig; requestId: string; userHash?: string }) {
+  const lock = `storyboard:illustrate:${input.journeyId}`;
+  if (await kvGet(lock)) return;
+  await kvSet(lock, 1, 120);
+  try {
+    const journey = await loadJourneyForStoryboard(input.journeyId);
+    const storyboard = journey?.plan?.storyboard;
+    if (!storyboard?.panels?.length) return;
+    const ids = storyboard.panels.map((panel) => panel.topic_id);
+    const topics = (await supabaseRequest<Topic[]>(`concepts?id=in.(${ids.join(",")})&select=id,name,summary,content_id`)) ?? [];
+    const byId = new Map(topics.map((topic) => [topic.id, topic]));
+    const ordered = ids.map((id) => byId.get(id)).filter((topic): topic is Topic => Boolean(topic));
+    const images = await illustrateTopics(ordered, input.config, { requestId: input.requestId, userHash: input.userHash });
+    // Re-read the plan so a change made meanwhile is not overwritten.
+    const latest = (await supabaseRequest<Array<{ plan: JourneyRow["plan"] }>>(`journeys?id=eq.${input.journeyId}&select=plan`))?.[0]?.plan;
+    if (!latest?.storyboard) return;
+    const panels = latest.storyboard.panels.map((panel) => (images.get(panel.topic_id) ? { ...panel, image: images.get(panel.topic_id) } : panel));
+    await supabaseRequest(`journeys?id=eq.${input.journeyId}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ plan: { ...latest, storyboard: { ...latest.storyboard, panels, illustrated_at: new Date().toISOString() } } }),
+    });
+  } finally {
+    await kvDel(lock);
+  }
+}
+
+/** The storyboard as served: stored image paths become short-lived signed links. */
+export async function withImageUrls(storyboard: Storyboard): Promise<Storyboard> {
+  const paths = storyboard.panels.map((panel) => panel.image?.path).filter((path): path is string => Boolean(path));
+  if (!paths.length) return storyboard;
+  const urls = await signedImageUrls(paths).catch(() => new Map<string, string>());
+  return { ...storyboard, panels: storyboard.panels.map((panel) => (panel.image && urls.get(panel.image.path) ? { ...panel, image_url: urls.get(panel.image.path) } : panel)) };
 }
 
 export async function loadJourneyForStoryboard(journeyId: string) {

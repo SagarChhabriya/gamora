@@ -28,17 +28,21 @@ It is built for **individual self-learners**: students, working professionals, c
 | **Four ways through** | Narrative (one continuing story), Scenarios (situations to act in), Quick scan (a light pass over everything) or Focus (one topic at a time with worked examples). |
 | **Fifteen ways to see a lesson** | Notes and flow plus 13 diagram views such as side by side, share split, trend bars, loop, quadrant and cause chain. A view is offered only when the material has the data for it, and numbers are never invented. |
 | **Mastery without tests** | Every answer is evidence. Two clean answers unlock the next mission, three master a topic, and knowledge fades slowly without practice. The full calculation is in [docs/MASTERY.md](docs/MASTERY.md). |
-| **Voice and hands-free** | Speak your answers, have replies read aloud in a South Asian English voice where the device has one, or go fully hands-free: Gamora reads each step and listens for "next", "hint", "repeat", an option or your answer. |
+| **Voice and hands-free** | Speak your answers in English or Urdu, hear replies in a natural Pakistani cloud voice that reads Roman Urdu and English alike (the device voice takes over if the cloud is busy), or go fully hands-free: Gamora reads each step and listens for "next", "hint", "repeat", an option or your answer. |
+| **Comes back to what fades** | Topics you practised but have not mastered are tracked as they fade. The home page offers a short review of the ones slipping most, and a daily job sends review nudges within the cadence an admin sets. |
+| **Illustrated storyboards** | Each storyboard panel can carry a generated illustration. Images belong to topics, so every learner of a source shares them, within a monthly budget the admin sets. |
 | **Game elements with purpose** | XP only for meaningful actions, levels, streaks with a grace day, stars per mission and badges for things like fixing your own answer or clearing a Capstone case without a hint. |
+| **Start from just a topic** | No material? Name a topic and say what you need. Gamora writes a primer, labelled as AI-written at the top of every citation, and builds the journey from it. |
 | **Friendly to real material** | Long documents are grouped into at most 12 topics by default (your choice, up to 30), each keeping its finer ideas as key points. |
 | **Accessible** | Text-only mode, high contrast, keyboard navigation, reduced motion, a phone layout, and a guided tour for first-time users. |
-| **Honest when busy** | When a free AI service is at its limit, Gamora switches to a backup and tells you, rather than going silent. |
+| **Honest when busy** | When an AI service is at its limit, Gamora switches to a backup and tells you, rather than going silent. |
+| **Guards your material** | Every upload is read by a classifier for text addressed to the AI (hidden instructions). Flagged passages are removed and you are told; instructions meant for people, and material that teaches about such attacks, are left alone. |
 
 ## How it works
 
 ```mermaid
 flowchart LR
-    A[Your material<br/>PDF, Word, text, link] --> B[Content map<br/>passages, topics, order]
+    A[Your material<br/>topic, PDF, Word, text, link] --> B[Content map<br/>passages, topics, order]
     B --> C[Journey<br/>route, missions, capstone]
     C --> D[Storyboard<br/>illustrated preview]
     D --> E[Missions<br/>learn, practise, adapt]
@@ -50,7 +54,8 @@ flowchart LR
 - **Long work in short steps.** Reading a long PDF happens as a series of short, resumable steps, so it fits within serverless time limits and can safely retry.
 - **Rules decide, the model writes.** How difficulty and pace change is decided by a small, tested rule table in code. The language model only writes the content: lessons, situations, feedback. This keeps adaptation predictable and explainable.
 - **Checked before shown.** Generated content cites the passages it relies on and is checked against them by a second model. Anything that fails is rewritten once, then replaced by teaching straight from the source.
-- **Resilient on free tiers.** Model calls go through one router that tries several contributor keys and several providers (Groq, then Gemini, then OpenRouter), caches repeated work and prepares the next step while you read.
+- **Resilient and cheap.** Model calls go through one router that tries several keys and several providers (Groq on a paid tier, then Gemini, then OpenRouter), caches repeated work and prepares the next step while you read. A mission costs about one US cent in model calls.
+- **Media made once, shared.** Illustrations are generated per topic of a source, not per learner, and a cost evaluator checks the admin's tier, monthly budget and per-source cap before each one.
 
 A deeper tour of the architecture, the request flow, the data model and the reasoning behind each technology choice is in [docs/PROJECT_OVERVIEW.md](docs/PROJECT_OVERVIEW.md).
 
@@ -61,11 +66,12 @@ A deeper tour of the architecture, the request flow, the data model and the reas
 | App | Next.js 16, React 19, TypeScript, Tailwind CSS 4 |
 | Data and sign-in | Supabase (Postgres with row-level security, Auth) |
 | Cache and rate limits | Upstash Redis |
-| Language models | Groq (gpt-oss 20b and 120b), Google Gemini, OpenRouter |
-| Voice | Browser speech recognition and synthesis, Whisper as a fallback |
+| Language models | Groq (gpt-oss 20b and 120b, gpt-oss-safeguard for the source guard), Google Gemini, OpenRouter |
+| Voice | Browser speech recognition, Groq Whisper as a fallback, Gemini TTS for read-aloud with the device voice as a fallback |
+| Images | Gemini Flash Image models, stored in a private Supabase bucket behind short-lived links |
 | Quality | Zod validation, Vitest, Playwright, GitHub Actions |
 | Monitoring | Sentry and a structured events log |
-| Hosting | Vercel and Supabase free tiers |
+| Hosting | Vercel (with a daily cron job) and Supabase free tiers |
 
 ## How it was developed
 
@@ -109,11 +115,13 @@ docs               project overview, mastery calculation, database queries
 
 ## Privacy
 
-Audio is never stored. Logs use hashed identifiers, dashboards are pseudonymised, every table is protected by row-level security, and learners can delete their account and all their data from the profile menu.
+Audio is never stored, in either direction. Logs use hashed identifiers, dashboards are pseudonymised, every table is protected by row-level security, and learners can delete their account and all their data from the profile menu.
 
 ## Limitations
 
 - Mastery is an explainable estimate built from learning evidence, not a psychometrically validated score.
 - Roman Urdu quality depends on the free models available and would benefit from review by native speakers.
-- Read-aloud uses the voices on your device; a true Urdu voice is not used because Gamora writes in the Latin alphabet.
-- Free AI tiers limit requests per minute, so replies can be slower at busy times.
+- The cloud voice takes a few seconds before it starts speaking; long replies are spoken one sentence group at a time to keep the wait short.
+- Generated illustrations need billing on the Gemini key (no free tier for images). Without it, panels keep their drawn views.
+- Nudges appear in the app only. Email or Teams delivery would read the same nudges table but is not built.
+- The Gemini fallback runs on a free tier, so when Groq is down, replies can be slower.

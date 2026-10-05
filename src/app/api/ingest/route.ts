@@ -5,11 +5,13 @@ import { requireUser } from "@/lib/auth/server";
 import { getActiveConfig } from "@/lib/config/active";
 import { RemoteSourceError, parseFile, parseRemoteSource, parseTextSource } from "@/lib/ingest/parse";
 import { createIngestJob } from "@/lib/ingest/pipeline";
+import { blockedTopic, writePrimer } from "@/lib/ingest/topic-primer";
 import { scanForPromptInjection } from "@/lib/ingest/security";
 import { resolveTopicCap } from "@/lib/ingest/topics";
 import { supabaseRequest } from "@/lib/supabase/server";
 import { logEvent } from "@/lib/observability/events";
 import { getOrCreateRequestId } from "@/lib/observability/request-id";
+import { guardSource, removePassages } from "@/lib/security/prompt-guard";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { reportError } from "@/lib/observability/sentry";
 
@@ -20,6 +22,8 @@ const bodySchema = z.object({
   title: z.string().trim().min(1).max(200),
   text: z.string().max(1_000_000).optional(),
   url: z.string().url().optional(),
+  // A learning topic or brief with no document: a primer is written from it (see topic-primer).
+  topic: z.string().trim().min(3).max(1_500).optional(),
 });
 
 /** What the Studio needs to guide a URL source: the sites it may come from. Empty means any public site. */
@@ -65,8 +69,14 @@ export async function POST(request: Request) {
       } else if (body.text) {
         text = await parseTextSource(body.text);
         sourceType = "text";
+      } else if (body.topic) {
+        const { config } = await getActiveConfig();
+        const blocked = blockedTopic(`${body.title} ${body.topic}`, config.safety.blocked_topics);
+        if (blocked) return NextResponse.json({ error: `Learning about "${blocked}" is turned off by the administrator.` }, { status: 422 });
+        text = await writePrimer({ topic: body.title, brief: body.topic, requestId, userHash: auth.user.userHash });
+        sourceType = "topic";
       } else {
-        throw new Error("Provide text or url");
+        throw new Error("Provide a topic, text, a link or a file");
       }
     }
 
@@ -89,6 +99,26 @@ export async function POST(request: Request) {
       getActiveConfig(),
       supabaseRequest<Array<{ topic_cap: number | null }>>(`profiles?id=eq.${auth.user.id}&select=topic_cap`),
     ]);
+    // Model check for instructions aimed at the AI. Standard strictness removes the flagged
+    // passages and keeps the rest of the source; strict refuses the source.
+    const guard = await guardSource(text, { requestId, userHash: auth.user.userHash });
+    const cleaned = guard.flagged && config.safety.injection_strictness === "standard" ? removePassages(text, guard.evidence) : { text, removed: 0 };
+    await logEvent({
+      request_id: requestId,
+      user_hash: auth.user.userHash,
+      type: "ingest.guard",
+      ok: guard.flagged === 0,
+      payload: { checked: guard.checked, windows: guard.windows, flagged_windows: guard.flagged, removed: cleaned.removed, strictness: config.safety.injection_strictness },
+    });
+    if (guard.flagged && config.safety.injection_strictness === "strict") {
+      return NextResponse.json({ error: "Source contains text addressed to the AI, so it was not added.", evidence: guard.evidence.slice(0, 3) }, { status: 422 });
+    }
+    text = cleaned.text;
+    const warning = guard.flagged
+      ? cleaned.removed
+        ? `Removed ${cleaned.removed} ${cleaned.removed === 1 ? "passage" : "passages"} that gave instructions to the AI. The rest of the source is ready to learn from.`
+        : "Parts of this source seem to address the AI. Gamora treats them as plain text and never follows them."
+      : undefined;
     const topicCap = resolveTopicCap(profiles?.[0]?.topic_cap, config);
     const created = await createIngestJob({ ownerId: auth.user.id, title, sourceType, text, topicCap });
     await logEvent({
@@ -98,7 +128,7 @@ export async function POST(request: Request) {
       payload: { content_id: created.contentId, source_type: sourceType, language: created.language, chars: text.length },
     });
     return NextResponse.json(
-      { content_id: created.contentId, language: created.language, job: created.job, duplicate: created.duplicate },
+      { content_id: created.contentId, language: created.language, job: created.job, duplicate: created.duplicate, warning },
       { status: created.duplicate ? 200 : 201 },
     );
   } catch (error) {

@@ -72,6 +72,9 @@ export const defaultUrlDomains = [
   "secp.gov.pk",
 ] as const;
 
+/** Gemini TTS voices offered in admin settings. All of them speak Urdu and English. */
+export const cloudVoices = ["Kore", "Aoede", "Leda", "Zephyr", "Puck", "Charon", "Orus", "Fenrir"] as const;
+
 export const appConfigSchema = z.object({
   content: z.object({
     max_upload_mb: z.number().min(1).max(10).default(10),
@@ -166,6 +169,29 @@ export const appConfigSchema = z.object({
     text_only_default: z.boolean().default(false),
     high_contrast_default: z.boolean().default(false),
     celebrations: z.boolean().default(true),
+  }),
+  voice: z.object({
+    // cloud: a generated Pakistani voice that speaks Urdu and English; browser: the device's own voices.
+    // Cloud falls back to the browser voice when the service is busy or off.
+    engine: z.enum(["cloud", "browser"]).default("cloud"),
+    cloud_voice: z.enum(cloudVoices).default("Kore"),
+  }),
+  media: z.object({
+    // Illustrations for storyboard panels, made once per topic of a source and shared by every learner.
+    // Off until billing is on for the Gemini key: image models have no free tier.
+    images: z.boolean().default(false),
+    image_tier: z.enum(["economy", "standard"]).default("economy"),
+    monthly_budget_usd: z.number().min(0).max(500).default(5),
+    max_images_per_source: z.number().int().min(0).max(40).default(12),
+  }),
+  engagement: z.object({
+    nudges: z.boolean().default(true),
+    // A topic is due for review this many days after it was last practised, if it is not mastered.
+    review_after_days: z.number().int().min(1).max(30).default(3),
+    // At most one nudge per learner every this many days, and no more than max_per_week in 7 days.
+    cadence_days: z.number().int().min(1).max(14).default(2),
+    max_per_week: z.number().int().min(0).max(7).default(3),
+    review_size: z.number().int().min(1).max(8).default(3),
   }),
 });
 

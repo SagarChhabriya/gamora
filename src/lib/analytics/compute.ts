@@ -196,6 +196,14 @@ export function computeDashboard(raw: Raw, config: AppConfig, options: { reveal:
   const tokensIn = llmOk.reduce((sum, event) => sum + (event.tokens_in ?? 0), 0);
   const tokensOut = llmOk.reduce((sum, event) => sum + (event.tokens_out ?? 0), 0);
   const cost = llmOk.reduce((sum, event) => sum + Number(event.payload.cost_usd ?? 0), 0);
+  // Voice and images, priced at list rates when made (media/pricing).
+  const speech = raw.events.filter((event) => event.type === "voice.tts");
+  const images = raw.events.filter((event) => event.type === "media.image");
+  const mediaCost = (rows: Raw["events"]) => rows.filter((event) => event.ok).reduce((sum, event) => sum + Number(event.payload.cost_usd ?? 0), 0);
+  // Re-engagement: nudges sent by the daily job, seen on the home page, and reviews started from the card.
+  const count = (type: string) => raw.events.filter((event) => event.type === type).length;
+  const nudgesSent = count("nudge.sent");
+  const reviewsStarted = count("nudge.review_started");
 
   return {
     overview: {
@@ -224,6 +232,21 @@ export function computeDashboard(raw: Raw, config: AppConfig, options: { reveal:
       est_cost_usd: cost,
       providers: [...providers.entries()].map(([provider, calls]) => ({ provider, calls })),
       errors: errorsCount,
+      tts_clips: speech.filter((event) => event.ok).length,
+      tts_fallbacks: speech.filter((event) => !event.ok).length,
+      tts_cost_usd: mediaCost(speech),
+      images_made: images.filter((event) => event.ok).length,
+      images_failed: images.filter((event) => !event.ok).length,
+      image_cost_usd: mediaCost(images),
+    },
+    engagement: {
+      nudges_sent: nudgesSent,
+      nudges_seen: raw.events.filter((event) => event.type === "nudge.seen").reduce((sum, event) => sum + Number(event.payload.count ?? 1), 0),
+      reviews_started: reviewsStarted,
+      reviews_from_nudge: raw.events.filter((event) => event.type === "nudge.review_started" && event.payload.from_nudge).length,
+      dismissed: count("nudge.dismissed"),
+      // Share of sent nudges that led to a review. Reviews started without a nudge are counted separately.
+      nudge_return_rate: nudgesSent ? raw.events.filter((event) => event.type === "nudge.review_started" && event.payload.from_nudge).length / nudgesSent : null,
     },
     quality: {
       grounding_pass_rate: grounding.length ? grounding.filter((event) => event.ok).length / grounding.length : null,

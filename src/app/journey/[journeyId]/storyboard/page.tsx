@@ -42,11 +42,20 @@ function StoryboardScreen() {
         timer = window.setTimeout(() => void load(attempt + 1), 4_000);
         return;
       }
-      const payload = (await response.json().catch(() => ({}))) as { storyboard?: Storyboard; error?: string; notices?: NoticeMessage[] };
+      const payload = (await response.json().catch(() => ({}))) as { storyboard?: Storyboard; illustrating?: boolean; error?: string; notices?: NoticeMessage[] };
       showNotices(payload.notices);
-      if (!response.ok || !payload.storyboard) setError(payload.error ?? "Could not prepare the storyboard.");
-      else setStoryboard(payload.storyboard);
+      if (!response.ok || !payload.storyboard) {
+        setError(payload.error ?? "Could not prepare the storyboard.");
+        return;
+      }
+      setStoryboard(payload.storyboard);
+      // Illustrations arrive after the storyboard; fetch again to pick them up while it plays.
+      if (payload.illustrating || (illustrationChecks > 0 && illustrationChecks < 3 && payload.storyboard.panels.some((panel) => !panel.image_url))) {
+        if (illustrationChecks < 3) timer = window.setTimeout(() => void load(attempt), 15_000);
+        illustrationChecks += 1;
+      }
     };
+    let illustrationChecks = 0;
     void load(0).catch(() => setError("Could not reach Gamora. Check your connection and try again."));
     authFetch(`/api/journeys/${params.journeyId}`)
       .then(async (response) => (response.ok ? ((await response.json()) as { missions: MissionView[] }) : null))

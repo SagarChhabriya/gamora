@@ -20,6 +20,8 @@ export const rateLimitPolicies = {
   ingest_step: { tokens: 120, window: "1 m" },
   tutor: { tokens: 30, window: "1 m" },
   assistant: { tokens: 15, window: "1 m" },
+  // Read-aloud asks for one sentence group at a time, so it needs more room than tutor turns.
+  tts: { tokens: 60, window: "1 m" },
   llm_daily: { tokens: 600, window: "1 d" },
 } satisfies Record<string, { tokens: number; window: Window }>;
 

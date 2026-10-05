@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { requireUser } from "@/lib/auth/server";
@@ -7,7 +7,8 @@ import { noticeMessages, withLlmNotices } from "@/lib/llm/notices";
 import { getOrCreateRequestId } from "@/lib/observability/request-id";
 import { reportError } from "@/lib/observability/sentry";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
-import { ensureStoryboard, loadJourneyForStoryboard } from "@/lib/storyboard/generate";
+import { ensureStoryboard, illustrateStoryboard, loadJourneyForStoryboard, withImageUrls } from "@/lib/storyboard/generate";
+import { needsIllustration } from "@/lib/storyboard/story";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -36,7 +37,11 @@ export async function GET(request: Request, context: RouteContext) {
   try {
     const { result: storyboard, notices } = await withLlmNotices(() => ensureStoryboard({ journey, config, requestId, userHash: auth.user.userHash }));
     if (storyboard === "pending") return NextResponse.json({ status: "pending" }, { status: 202 });
-    return NextResponse.json({ storyboard, notices: noticeMessages(notices) });
+    // Illustrations are made after the response, so the storyboard plays at once with drawn views
+    // and the page picks the images up on a later fetch.
+    const illustrating = needsIllustration(storyboard, config.media.images);
+    if (illustrating) after(() => illustrateStoryboard({ journeyId, config, requestId, userHash: auth.user.userHash }).catch((error) => reportError(error, { requestId, area: "storyboard.illustrate" })));
+    return NextResponse.json({ storyboard: await withImageUrls(storyboard), illustrating, notices: noticeMessages(notices) });
   } catch (error) {
     reportError(error, { requestId, userHash: auth.user.userHash, area: "storyboard" });
     return NextResponse.json({ error: "Could not prepare the storyboard. Please try again." }, { status: 500 });

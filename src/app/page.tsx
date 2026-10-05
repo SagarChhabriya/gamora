@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 
 import { AppShell } from "@/components/app-shell";
 import { showNotices, type NoticeMessage } from "@/components/llm-notices";
+import { ReviewCard } from "@/components/review-card";
 import { RouteChooser } from "@/components/route-chooser";
 import { dismissTour, startTour, tourSeen } from "@/components/tour";
 import { Alert, Button, Eyebrow, Meter } from "@/components/ui";
@@ -126,6 +127,8 @@ function Home({ session }: { session: SessionPayload }) {
           </Link>
         </Alert>
       ) : null}
+
+      {journeys?.length ? <ReviewCard /> : null}
 
       <section aria-label="Your journeys" className="space-y-4" data-tour="journeys">
         <h2 className="text-xl font-semibold">Your journeys</h2>

@@ -21,10 +21,20 @@ const providers: Record<string, LLMProvider> = {
   openrouter: new OpenRouterProvider(),
 };
 
-/** Rough USD per million tokens, used only for the cost estimate on dashboards. Free tier cost is zero. */
+/**
+ * USD per million tokens at list price, used only for the cost estimate on dashboards.
+ * Per model where known (Groq and Gemini pricing pages, 2026-10-05), else the provider default.
+ */
+const modelCostPerMillion: Record<string, { input: number; output: number }> = {
+  "openai/gpt-oss-120b": { input: 0.15, output: 0.6 },
+  "openai/gpt-oss-20b": { input: 0.075, output: 0.3 },
+  "qwen/qwen3.8-27b": { input: 0.8, output: 4 },
+  "gemini-3.5-flash-lite": { input: 0.3, output: 2.5 },
+  "gemini-3.8-flash": { input: 0.75, output: 3.75 },
+};
 const costPerMillion: Record<string, { input: number; output: number }> = {
-  groq: { input: 0.1, output: 0.5 },
-  gemini: { input: 0.1, output: 0.4 },
+  groq: { input: 0.15, output: 0.6 },
+  gemini: { input: 0.3, output: 2.5 },
   openrouter: { input: 0, output: 0 },
 };
 
@@ -101,8 +111,9 @@ export function estimateCostUsd(
   provider: string,
   inputTokens = 0,
   outputTokens = 0,
+  model?: string,
 ) {
-  const rate = costPerMillion[provider];
+  const rate = (model ? modelCostPerMillion[model] : undefined) ?? costPerMillion[provider];
   if (!rate) return 0;
   return (inputTokens * rate.input + outputTokens * rate.output) / 1_000_000;
 }
@@ -197,6 +208,7 @@ export async function generateWithFallback(
                 provider.name,
                 response.inputTokens,
                 response.outputTokens,
+                model,
               ),
             },
           });

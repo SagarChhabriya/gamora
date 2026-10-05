@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { authFetch } from "@/lib/auth/client";
 import { isSouthAsian, pickVoice } from "@/lib/voice/pick-voice";
+import { splitForSpeech } from "@/lib/voice/speech-chunks";
 
 type Language = "en" | "roman_ur";
 
@@ -39,6 +40,57 @@ async function normalise(text: string) {
   return ((await response.json()) as { text?: string }).text ?? text;
 }
 
+/** A 0.05 s silent WAV, played inside a tap so later audio may start on phones. */
+let silentUrl: string | null = null;
+function silentWav() {
+  if (silentUrl) return silentUrl;
+  const samples = 400;
+  const view = new DataView(new ArrayBuffer(44 + samples * 2));
+  const text = (offset: number, value: string) => [...value].forEach((char, index) => view.setUint8(offset + index, char.charCodeAt(0)));
+  text(0, "RIFF");
+  view.setUint32(4, 36 + samples * 2, true);
+  text(8, "WAVEfmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, 8_000, true);
+  view.setUint32(28, 16_000, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  text(36, "data");
+  view.setUint32(40, samples * 2, true);
+  silentUrl = URL.createObjectURL(new Blob([view.buffer], { type: "audio/wav" }));
+  return silentUrl;
+}
+
+/** Cloud voice clips already fetched this page visit, by language and text. */
+const speechCache = new Map<string, Promise<string | null>>();
+/** After a refusal (voice off, busy, signed out) the device voice is used for this long. */
+const cloudOffUntil = { current: 0 };
+
+function fetchSpeech(text: string, language: Language): Promise<string | null> {
+  const key = `${language}:${text}`;
+  const cached = speechCache.get(key);
+  if (cached) return cached;
+  const pending = authFetch("/api/voice/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, language }) })
+    .then(async (response) => {
+      if (!response.ok) {
+        // Off stays off for the visit; busy or rate limited tries the cloud again in a minute.
+        cloudOffUntil.current = Date.now() + (response.status === 404 ? 3_600_000 : 60_000);
+        speechCache.delete(key);
+        return null;
+      }
+      return URL.createObjectURL(await response.blob());
+    })
+    .catch(() => {
+      speechCache.delete(key);
+      return null;
+    });
+  speechCache.set(key, pending);
+  if (speechCache.size > 60) speechCache.delete(speechCache.keys().next().value as string);
+  return pending;
+}
+
 /**
  * Voice input and output. Web Speech first, then recorded audio to the Whisper fallback route,
  * and always a text fallback. Raw audio is never stored.
@@ -49,6 +101,8 @@ export function useVoice(language: Language, onText?: (text: string) => void, on
   const [note, setNote] = useState<string | null>(null);
   const [speaking, setSpeaking] = useState(false);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  // Which voice spoke last: the cloud voice or the device's own. Null until something is spoken.
+  const [engine, setEngine] = useState<"cloud" | "device" | null>(null);
   const recognition = useRef<Recognition | null>(null);
   const recorder = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
@@ -65,10 +119,12 @@ export function useVoice(language: Language, onText?: (text: string) => void, on
   }, []);
 
   const sttSupported = typeof window !== "undefined" && (Boolean(recognitionCtor()) || typeof MediaRecorder !== "undefined");
-  const ttsSupported = typeof window !== "undefined" && "speechSynthesis" in window;
+  const ttsSupported = typeof window !== "undefined" && ("speechSynthesis" in window || typeof Audio !== "undefined");
+  const generation = useRef(0);
+  const audio = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    if (!ttsSupported) return;
+    if (!ttsSupported || !("speechSynthesis" in window)) return;
     const load = () => setVoices(window.speechSynthesis.getVoices());
     load();
     window.speechSynthesis.addEventListener("voiceschanged", load);
@@ -164,11 +220,16 @@ export function useVoice(language: Language, onText?: (text: string) => void, on
     if (recorder.current?.state === "recording") recorder.current.stop();
   }, []);
 
-  /** Speaks text in the most Pakistani-sounding English voice the device has (see pick-voice). */
-  const speak = useCallback(
-    (text: string, options?: { onEnd?: () => void }) => {
-      if (!ttsSupported || !text) return false;
+  /** Device speech in the most Pakistani-sounding English voice the device has (see pick-voice). */
+  const browserSpeak = useCallback(
+    (text: string, onEnd?: () => void) => {
+      if (!("speechSynthesis" in window) || !text) {
+        setSpeaking(false);
+        onEnd?.();
+        return;
+      }
       window.speechSynthesis.cancel();
+      setEngine("device");
       const utterance = new SpeechSynthesisUtterance(text.replace(/[*_#>`]/g, ""));
       // A Pakistani or other South Asian English voice first, for English and Roman Urdu alike.
       const preferred = pickVoice(voices);
@@ -179,25 +240,81 @@ export function useVoice(language: Language, onText?: (text: string) => void, on
       utterance.onstart = () => setSpeaking(true);
       utterance.onend = () => {
         setSpeaking(false);
-        options?.onEnd?.();
+        onEnd?.();
       };
       // A cancelled utterance (the next one started) is not a finish, so it does not call onEnd.
       utterance.onerror = () => setSpeaking(false);
       window.speechSynthesis.speak(utterance);
+    },
+    [voices],
+  );
+
+  /**
+   * Speaks text. The cloud voice (Urdu and English, set by the admin) goes first, one sentence
+   * group at a time with the next group fetched while the current one plays. Any failure hands the
+   * rest of the text to the device voice, so read-aloud never goes silent.
+   */
+  const speak = useCallback(
+    (text: string, options?: { onEnd?: () => void }) => {
+      if (!ttsSupported || !text) return false;
+      const run = ++generation.current;
+      audio.current?.pause();
+      if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+      const groups = splitForSpeech(text);
+      if (!groups.length) return false;
+      if (Date.now() < cloudOffUntil.current || typeof Audio === "undefined") {
+        browserSpeak(text, options?.onEnd);
+        return true;
+      }
+      // Phones only allow audio that a tap started: priming the element inside this call unlocks it.
+      audio.current ??= new Audio();
+      const player = audio.current;
+      player.src = silentWav();
+      void player.play().catch(() => undefined);
+      setSpeaking(true);
+
+      void (async () => {
+        let next = fetchSpeech(groups[0], language);
+        for (let index = 0; index < groups.length; index += 1) {
+          const url = await next;
+          if (run !== generation.current) return;
+          if (!url) {
+            browserSpeak(groups.slice(index).join(" "), options?.onEnd);
+            return;
+          }
+          if (index + 1 < groups.length) next = fetchSpeech(groups[index + 1], language);
+          player.src = url;
+          setEngine("cloud");
+          const finished = await new Promise<boolean>((resolve) => {
+            player.onended = () => resolve(true);
+            player.onerror = () => resolve(false);
+            player.play().catch(() => resolve(false));
+          });
+          if (run !== generation.current) return;
+          if (!finished) {
+            browserSpeak(groups.slice(index).join(" "), options?.onEnd);
+            return;
+          }
+        }
+        setSpeaking(false);
+        options?.onEnd?.();
+      })();
       return true;
     },
-    [ttsSupported, voices],
+    [ttsSupported, browserSpeak, language],
   );
 
   const silence = useCallback(() => {
-    if (ttsSupported) window.speechSynthesis.cancel();
+    generation.current += 1;
+    audio.current?.pause();
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
     setSpeaking(false);
-  }, [ttsSupported]);
+  }, []);
 
   // Hands-free needs recognition that ends on its own when the learner stops talking.
   const autoStopSupported = typeof window !== "undefined" && Boolean(recognitionCtor());
 
   const southAsianVoice = isSouthAsian(pickVoice(voices));
 
-  return { listening, transcript, setTranscript, note, setNote, start, stop, speak, silence, speaking, sttSupported, ttsSupported, autoStopSupported, hasVoices: voices.length > 0, southAsianVoice };
+  return { listening, transcript, setTranscript, note, setNote, start, stop, speak, silence, speaking, engine, sttSupported, ttsSupported, autoStopSupported, hasVoices: voices.length > 0, southAsianVoice };
 }

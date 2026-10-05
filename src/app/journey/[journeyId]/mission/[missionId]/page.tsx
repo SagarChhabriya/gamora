@@ -157,7 +157,10 @@ function Mission() {
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    void send({ action: "start" });
+    // A review link from the home page opens a fresh practice round on a finished mission.
+    const review = new URLSearchParams(window.location.search).get("review") === "1";
+    if (review) window.history.replaceState(null, "", window.location.pathname);
+    void send({ action: review ? "practice" : "start" });
   }, [send]);
 
   useEffect(() => {
@@ -350,7 +353,7 @@ function Mission() {
         {readAloudToggle}
         {handsFreeToggle}
         {!voice.ttsSupported ? <p className="text-xs text-ink/55">This browser cannot read aloud. Text works fully.</p> : null}
-        {(readAloud || handsFree.on) && voice.hasVoices && !voice.southAsianVoice ? (
+        {(readAloud || handsFree.on) && voice.engine === "device" && voice.hasVoices && !voice.southAsianVoice ? (
           <p className="text-xs text-ink/55">This device has no Pakistani or South Asian English voice, so a standard English voice reads aloud. In Microsoft Edge, the English (India) voices sound closest.</p>
         ) : null}
       </fieldset>
