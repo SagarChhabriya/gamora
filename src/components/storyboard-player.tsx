@@ -204,7 +204,7 @@ export function StoryboardPlayer({ storyboard, startHref, onFinish, speak, silen
         <div className="h-full bg-accent transition-[width] duration-500 motion-reduce:transition-none" style={{ width: `${(Math.min(index, total) / total) * 100}%` }} />
       </div>
 
-      <div className="sticky bottom-0 z-20 -mx-4 flex items-center gap-2 border-t border-ink/15 bg-paper/95 py-3 pl-4 pr-20 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:p-0">
+      <div className="sticky bottom-0 z-20 -mx-4 flex items-center gap-2 border-t border-ink/15 bg-paper/95 py-3 pl-4 pr-20 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:p-0 sm:pr-20">
         <Button variant="secondary" onClick={() => go(index - 1)} disabled={index === 0} aria-label="Previous panel" className="px-3">
           ◀<span className="hidden sm:inline">Back</span>
         </Button>

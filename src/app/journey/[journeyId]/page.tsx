@@ -78,7 +78,8 @@ function JourneyMap() {
   if (error) return <Alert>{error}</Alert>;
   if (!data) return <p className="text-ink/60">Loading your journey...</p>;
 
-  const concepts = data.missions.flatMap((mission) => mission.concepts);
+  // A capstone repeats topics from earlier missions, so each topic is listed once.
+  const concepts = [...new Map(data.missions.flatMap((mission) => mission.concepts).map((concept) => [concept.id, concept])).values()];
   const done = data.missions.filter((mission) => mission.status === "completed").length;
 
   return (

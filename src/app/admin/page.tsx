@@ -10,6 +10,7 @@ import { Alert, Button, Card, Eyebrow } from "@/components/ui";
 import { downloadCsv, emptyFilters, filterQuery, type FilterState } from "@/lib/analytics/client";
 import type { Dashboard } from "@/lib/analytics/compute";
 import { authFetch } from "@/lib/auth/client";
+import { personaLabels, type Persona } from "@/lib/config/schema";
 
 type Payload = { dashboard: Dashboard; options: { contents: Array<{ id: string; title: string }>; personas: string[]; has_demo: boolean }; generated_at: string };
 type Health = { status: string; checks: Record<string, string> };
@@ -243,7 +244,7 @@ function AdminDashboard() {
                         {row.learner}
                         {row.demo ? <span className="ml-2 border border-accent/40 px-1 text-[10px] font-semibold uppercase text-accent">demo</span> : null}
                       </td>
-                      <td>{row.persona.replace("_", " ")}</td>
+                      <td>{personaLabels[row.persona as Persona] ?? row.persona.replace("_", " ")}</td>
                       <td>{row.language === "roman_ur" ? "Roman Urdu" : "English"}</td>
                       <td className="text-right tabular-nums">{row.sessions}</td>
                       <td className="text-right tabular-nums">{row.missions_completed}</td>
