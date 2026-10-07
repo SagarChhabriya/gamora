@@ -69,18 +69,90 @@ export function orderConcepts(concepts: PlannerConcept[], edges: PlannerEdge[]) 
   return ordered;
 }
 
-/** Missions the learner has time for, and how many concepts go in each. */
+/** A journey has at least this many missions and at most this many, its capstone case included. */
+export const MIN_MISSIONS = 2;
+export const MAX_MISSIONS = 10;
+
+/** True when a capstone case will close this journey, so it takes one of the mission places. */
+function hasCapstone(profile: LearnerProfile, config: AppConfig, conceptCount: number) {
+  return config.mechanics.capstone && profile.route !== "quick_scan" && conceptCount >= 2;
+}
+
+/**
+ * Missions the learner has time for, and how many concepts go in each. Two or more topics always
+ * make at least two missions, and the journey never passes ten missions with its capstone case.
+ */
 export function missionBudget(profile: LearnerProfile, conceptCount: number, config: AppConfig) {
   const route = profile.route ?? "narrative";
-  // A quick scan covers every topic, so missions hold more topics and the time budget does not cut any.
+  const cap = MAX_MISSIONS - (hasCapstone(profile, config, conceptCount) ? 1 : 0);
+  let missions: number;
+  let perMission: number;
   if (route === "quick_scan") {
-    const perMission = Math.max(4, Math.ceil(conceptCount / 8));
-    return { missions: Math.max(1, Math.min(8, Math.ceil(conceptCount / perMission))), perMission };
+    // A quick scan covers every topic, so missions hold more topics and the time budget does not cut any.
+    perMission = Math.max(4, Math.ceil(conceptCount / cap));
+    missions = Math.ceil(conceptCount / perMission);
+  } else {
+    perMission = route === "focus" ? 1 : profile.persona === "busy_rm" || profile.persona === "low_bandwidth" ? 2 : profile.persona === "expert" ? 4 : 3;
+    const byTime = Math.max(MIN_MISSIONS, Math.floor(profile.time_budget_min / config.learner.minutes_per_mission));
+    missions = Math.min(byTime, Math.ceil(conceptCount / perMission));
   }
-  const perMission = route === "focus" ? 1 : profile.persona === "busy_rm" || profile.persona === "low_bandwidth" ? 2 : profile.persona === "expert" ? 4 : 3;
-  const byTime = Math.max(1, Math.floor(profile.time_budget_min / config.learner.minutes_per_mission));
-  const needed = Math.ceil(conceptCount / perMission);
-  return { missions: Math.max(1, Math.min(8, byTime, needed)), perMission };
+  if (missions < MIN_MISSIONS && conceptCount >= MIN_MISSIONS) {
+    missions = MIN_MISSIONS;
+    perMission = Math.ceil(conceptCount / MIN_MISSIONS);
+  }
+  return { missions: Math.max(1, Math.min(cap, missions)), perMission };
+}
+
+/**
+ * True for a topic whose material is only its own name, such as a heading or a bank's name with
+ * nothing said about it. Nothing about it can be taught or asked, so journeys leave it out.
+ */
+export function isThinConcept(concept: Pick<PlannerConcept, "name" | "summary">) {
+  const words = (text: string) => text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  const name = new Set(words(concept.name));
+  return words(concept.summary).filter((word) => !name.has(word)).length < 3;
+}
+
+/** The topics a journey can teach. Thin topics are dropped unless nothing else is left. */
+export function teachableConcepts<T extends Pick<PlannerConcept, "name" | "summary">>(concepts: T[]) {
+  const usable = concepts.filter((concept) => !isThinConcept(concept));
+  return usable.length ? usable : concepts;
+}
+
+/**
+ * A journey of one mission gets a second: a one-topic mission becomes practise in situations, and a
+ * mission of several topics is split in two. The learner always has a path, never a single stop.
+ */
+export function withSecondMission(missions: PlannedMission[], profile: LearnerProfile, config: AppConfig): PlannedMission[] {
+  if (missions.length !== 1) return missions;
+  const [only] = missions;
+  const route = profile.route ?? "narrative";
+  const enabled = config.mechanics.enabled_activities;
+  const ur = profile.language === "roman_ur";
+  if (only.concept_ids.length >= 2) {
+    const half = Math.ceil(only.concept_ids.length / 2);
+    return [only.concept_ids.slice(0, half), only.concept_ids.slice(half)].map((ids, idx) => ({
+      ...only,
+      idx,
+      title: idx === 0 ? only.title : ur ? `${only.title}: agla qadam` : `${only.title}: next steps`,
+      concept_ids: ids,
+      activities: activitiesFor(ids, enabled, profile.persona, idx, route),
+      unlock_rule: { min_mastery: config.mastery.unlock_threshold, after_mission: idx === 0 ? null : 0 },
+    }));
+  }
+  return [
+    only,
+    {
+      idx: 1,
+      title: ur ? "Ab amal mein laayein" : "Put it to work",
+      story_hook: ur
+        ? "Jo aap ne seekha, ab usay naye halaat mein aazmayein. Har faisla aapki samajh ko pakka karega."
+        : "Now try what you learned in new situations. Each decision makes your understanding stick.",
+      concept_ids: only.concept_ids,
+      activities: activitiesFor(only.concept_ids, enabled, profile.persona, 1, route === "quick_scan" ? "quick_scan" : "scenarios"),
+      unlock_rule: { min_mastery: config.mastery.unlock_threshold, after_mission: 0 },
+    },
+  ];
 }
 
 const openers: ActivityType[] = ["explain_ask", "spot_error", "scenario"];
@@ -168,7 +240,8 @@ export function withCapstone(missions: PlannedMission[], profile: LearnerProfile
   ];
 }
 
-export function fallbackPlan(title: string, concepts: PlannerConcept[], edges: PlannerEdge[], profile: LearnerProfile, config: AppConfig): JourneyPlan {
+export function fallbackPlan(title: string, allConcepts: PlannerConcept[], edges: PlannerEdge[], profile: LearnerProfile, config: AppConfig): JourneyPlan {
+  const concepts = teachableConcepts(allConcepts);
   const ordered = orderConcepts(concepts, edges);
   const { missions, perMission } = missionBudget(profile, ordered.length, config);
   const selected = ordered.slice(0, missions * perMission);
@@ -187,7 +260,7 @@ export function fallbackPlan(title: string, concepts: PlannerConcept[], edges: P
     story_theme: "A working day where each mission is a real situation you handle with what you learn.",
     planner: "fallback",
     route,
-    missions: withCapstone(planned, profile, config, new Map(concepts.map((concept) => [concept.id, concept.name]))),
+    missions: withCapstone(withSecondMission(planned, profile, config), profile, config, new Map(concepts.map((concept) => [concept.id, concept.name]))),
   };
 }
 
@@ -215,7 +288,8 @@ export async function planJourney(input: {
   requestId?: string;
   userHash?: string;
 }): Promise<JourneyPlan> {
-  const { concepts, edges, profile, config } = input;
+  const { edges, profile, config } = input;
+  const concepts = teachableConcepts(input.concepts);
   const ordered = orderConcepts(concepts, edges);
   const { missions, perMission } = missionBudget(profile, ordered.length, config);
   const refs = new Map(ordered.map((concept, index) => [`C${index + 1}`, concept]));
@@ -234,7 +308,7 @@ export async function planJourney(input: {
       purpose: "journey.plan",
       requestId: input.requestId,
       userHash: input.userHash,
-      cacheKey: `plan:v4:${input.configVersion}:${profile.persona}:${profile.time_budget_min}:${profile.language}:${route}`,
+      cacheKey: `plan:v5:${input.configVersion}:${profile.persona}:${profile.time_budget_min}:${profile.language}:${route}`,
       messages: [
         {
           role: "system",
@@ -294,8 +368,8 @@ ${ordered.map((concept, index) => `C${index + 1}. ${concept.name} (level ${conce
     }
     if (!planned.length) throw new Error("Planner returned no usable missions");
     const names = new Map(concepts.map((concept) => [concept.id, concept.name]));
-    return { title: parsed.title, story_theme: parsed.story_theme, missions: withCapstone(planned, profile, config, names), planner: "llm", route };
+    return { title: parsed.title, story_theme: parsed.story_theme, missions: withCapstone(withSecondMission(planned, profile, config), profile, config, names), planner: "llm", route };
   } catch {
-    return fallbackPlan(input.title, concepts, edges, profile, config);
+    return fallbackPlan(input.title, input.concepts, edges, profile, config);
   }
 }

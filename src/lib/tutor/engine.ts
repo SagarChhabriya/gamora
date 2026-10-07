@@ -244,6 +244,9 @@ async function buildActivity(ctx: Ctx, state: SessionState, index: number): Prom
     };
   }
   const recentReply = state.roleplay_turns.filter((turn) => turn.role === "learner").at(-1)?.text;
+  // The check right after a lesson is judged against that lesson: it may only ask what the lesson taught.
+  const lesson = state.current?.type === "lesson" && state.current.concept_id === item.concept_id && state.queue[index - 1]?.type === "lesson" ? state.current.lesson : undefined;
+  const shown = lesson ? [lesson.key_idea, ...lesson.notes, ...lesson.flow, lesson.example].filter(Boolean).join(" | ") : undefined;
   const input = {
     type: state.text_only && item.type === "roleplay" ? ("scenario" as ActivityType) : item.type,
     concept: { id: concept.id, ...brief },
@@ -258,6 +261,7 @@ async function buildActivity(ctx: Ctx, state: SessionState, index: number): Prom
     intent: item.intent,
     workedExample: state.worked_example,
     learnerContext: recentReply,
+    shown,
     storyContext: storyContextFor(ctx.journey.plan?.storyboard),
     config: ctx.config,
     requestId: ctx.requestId,
@@ -271,7 +275,7 @@ async function buildActivity(ctx: Ctx, state: SessionState, index: number): Prom
       type: "grounding.check",
       latency_ms: Date.now() - started,
       ok: check.ok,
-      payload: { activity_type: check.type, checked: check.checked, unsupported: check.unsupported.length, attempt: check.attempt, strictness: ctx.config.grounding.verifier },
+      payload: { activity_type: check.type, checked: check.checked, unsupported: check.unsupported.length, attempt: check.attempt, answerable: check.answerable ?? null, strictness: ctx.config.grounding.verifier },
     }).then(() => undefined),
   );
   if (activity.grounded === "abstained") {

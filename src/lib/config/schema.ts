@@ -75,6 +75,22 @@ export const defaultUrlDomains = [
 /** Gemini TTS voices offered in admin settings. All of them speak Urdu and English. */
 export const cloudVoices = ["Kore", "Aoede", "Leda", "Zephyr", "Puck", "Charon", "Orus", "Fenrir"] as const;
 
+/**
+ * Deepgram Aura-2 English voices. Aura-2 has no Urdu or Hindi voice (checked 2026-10-07), so a
+ * Roman Urdu line is always spoken by the Gemini voice or the device, never by these.
+ */
+export const deepgramVoices = [
+  "aura-2-thalia-en",
+  "aura-2-andromeda-en",
+  "aura-2-helena-en",
+  "aura-2-asteria-en",
+  "aura-2-luna-en",
+  "aura-2-apollo-en",
+  "aura-2-arcas-en",
+  "aura-2-orion-en",
+  "aura-2-draco-en",
+] as const;
+
 export const appConfigSchema = z.object({
   content: z.object({
     max_upload_mb: z.number().min(1).max(10).default(10),
@@ -123,9 +139,12 @@ export const appConfigSchema = z.object({
     }),
     streak_grace_days: z.number().int().min(0).max(7).default(1),
     leaderboard: z.boolean().default(false),
-    // Illustrated preview of a journey, played before the first mission.
+    // Illustrated preview of a journey, played before the first mission. Each topic gets one scene
+    // per idea it holds, up to storyboard_scenes_per_topic, and the whole storyboard at most
+    // storyboard_panels scenes.
     storyboard: z.boolean().default(true),
-    storyboard_panels: z.number().int().min(3).max(8).default(6),
+    storyboard_panels: z.number().int().min(3).max(24).default(12),
+    storyboard_scenes_per_topic: z.number().int().min(1).max(7).default(3),
     // A closing mission whose case needs two or more topics at once.
     capstone: z.boolean().default(true),
     // One decision per mission whose outcome carries into the next step.
@@ -171,10 +190,20 @@ export const appConfigSchema = z.object({
     celebrations: z.boolean().default(true),
   }),
   voice: z.object({
-    // cloud: a generated Pakistani voice that speaks Urdu and English; browser: the device's own voices.
-    // Cloud falls back to the browser voice when the service is busy or off.
-    engine: z.enum(["cloud", "browser"]).default("cloud"),
+    // cloud: a generated Pakistani voice that speaks Urdu and English (Gemini); deepgram: Deepgram
+    // Aura-2 for English lines, with Roman Urdu lines still spoken by Gemini; browser: the device's
+    // own voices. Every cloud choice falls back to the device voice when the service is busy or off.
+    engine: z.enum(["cloud", "deepgram", "browser"]).default("cloud"),
     cloud_voice: z.enum(cloudVoices).default("Kore"),
+    deepgram_voice: z.enum(deepgramVoices).default("aura-2-thalia-en"),
+    // Server transcription, used when the browser has no speech recognition of its own (or always,
+    // with stt_server_first). groq: Whisper; deepgram: Nova-3, which supports Urdu.
+    stt_provider: z.enum(["groq", "deepgram"]).default("groq"),
+    // Push to talk records and sends audio to the server transcriber even when the browser could
+    // listen itself. Hands-free keeps the browser's recogniser, which knows when the learner stops.
+    stt_server_first: z.boolean().default(false),
+    // When the chosen cloud provider fails, try the other one before the device voice or typing.
+    cloud_backup: z.boolean().default(false),
   }),
   media: z.object({
     // Illustrations for storyboard panels, made once per topic of a source and shared by every learner.

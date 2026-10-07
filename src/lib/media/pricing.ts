@@ -73,3 +73,17 @@ export function sourceImageCost(panels: number, tier: ImageTier, learners = 1) {
   const total = panels * imageModels[tier].usdPerImage;
   return { totalUsd: Number(total.toFixed(4)), perLearnerUsd: Number((total / Math.max(1, learners)).toFixed(6)) };
 }
+
+/**
+ * Deepgram pay-as-you-go list prices checked on 2026-10-07 (deepgram.com/pricing): Nova-3 at
+ * $0.0048 per minute of audio and Aura-2 at $0.030 per 1,000 characters. Estimates only.
+ */
+export const deepgramPrices = { sttPerMinute: 0.0048, ttsPer1kChars: 0.03 };
+
+export function deepgramSttCostUsd(seconds: number) {
+  return (Math.max(0, seconds) / 60) * deepgramPrices.sttPerMinute;
+}
+
+export function deepgramTtsCostUsd(chars: number) {
+  return (Math.max(0, chars) / 1_000) * deepgramPrices.ttsPer1kChars;
+}

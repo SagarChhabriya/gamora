@@ -49,7 +49,7 @@ export const tourSteps: TourStep[] = [
     page: "journey",
     target: "storyboard",
     title: "Step 4: watch the storyboard",
-    body: "A short illustrated preview of the whole journey, one panel per topic. Every panel shows a quote from your material. The missions that follow keep the same people and setting.",
+    body: "A short illustrated preview of the whole journey, a few scenes per topic, one per idea. Every panel shows a quote from your material. The missions that follow keep the same people and setting.",
   },
   {
     id: "missions",

@@ -14,8 +14,9 @@ import { retrieveForConcept } from "@/lib/tutor/retrieval";
 import { parseLessonVisual, visualPromptShape } from "@/lib/visuals/schema";
 import { groundVisual } from "@/lib/visuals/views";
 
-type Topic = { id: string; name: string; summary: string; source_chunk_ids: string[]; content_id: string; key_points?: Array<{ name: string }> | null };
-type TopicSource = { topic: Topic; text: string; label: string };
+type Topic = { id: string; name: string; summary: string; source_chunk_ids: string[]; content_id: string; key_points?: Array<{ name: string; summary?: string; source_chunk_ids?: string[] }> | null };
+/** One topic's material, and how many scenes it gets (one per idea it holds, at least one). */
+type TopicSource = { topic: Topic; text: string; label: string; scenes?: number };
 
 const text = (max: number) => z.string().trim().min(1).max(max);
 
@@ -43,12 +44,17 @@ const storySchema = z.object({
 /** Builds panels from the model's answer, keeping only what the source supports. */
 export function buildPanels(raw: z.infer<typeof storySchema>["panels"], sources: TopicSource[]): StoryPanel[] {
   const byRef = new Map(sources.map((item, index) => [`T${index + 1}`, item]));
-  const used = new Set<string>();
+  const used = new Map<string, number>();
+  const headings = new Set<string>();
   const panels: StoryPanel[] = [];
   for (const panel of raw) {
     const item = byRef.get(panel.topic.trim().toUpperCase());
-    if (!item || used.has(item.topic.id)) continue;
-    used.add(item.topic.id);
+    // A topic gets at most its allowance of scenes, and never the same scene twice.
+    const heading = panel.heading.trim().toLowerCase();
+    if (!item || (used.get(item.topic.id) ?? 0) >= (item.scenes ?? 1) || headings.has(heading)) continue;
+    const scene = used.get(item.topic.id) ?? 0;
+    used.set(item.topic.id, scene + 1);
+    headings.add(heading);
     const notes = panel.notes.filter((note) => numbersStated(note, item.text));
     const flow = panel.flow.length >= 3 ? panel.flow.filter((step) => numbersStated(step, item.text)) : [];
     const visual = groundVisual(parseLessonVisual(panel.visual), item.text);
@@ -61,20 +67,74 @@ export function buildPanels(raw: z.infer<typeof storySchema>["panels"], sources:
       narration: numbersStated(panel.narration, item.text) ? panel.narration : keyIdea,
       view: panelView(source, visual?.best),
       source,
-      quote: panel.quote && quoteInSource(panel.quote, item.text) ? panel.quote.trim() : firstSentence(item.text),
+      quote: panel.quote && quoteInSource(panel.quote, item.text) ? panel.quote.trim() : nthSentence(item.text, scene),
       source_label: item.label,
     });
   }
-  return varyViews(panels);
+  // Scenes of one topic stay together, in topic order, whatever order the model returned them in.
+  const order = new Map(sources.map((item, index) => [item.topic.id, index]));
+  const sorted = panels
+    .map((panel, index) => ({ panel, index }))
+    .sort((a, b) => (order.get(a.panel.topic_id) ?? 0) - (order.get(b.panel.topic_id) ?? 0) || a.index - b.index)
+    .map(({ panel }) => panel);
+  return varyViews(sorted);
+}
+
+/** Prose sentences of a source text: the material a scene can be built from. */
+function proseSentences(text: string) {
+  return text
+    .replace(/\s+/g, " ")
+    .split(/(?<=[.!?])\s+/)
+    .filter((sentence) => sentence.split(" ").length >= 6 && (sentence.match(/\p{L}/gu) ?? []).length / Math.max(1, sentence.replace(/\s/g, "").length) >= 0.7);
+}
+
+/** The n-th usable sentence of a source, so each scene of a topic quotes a different line. */
+function nthSentence(text: string, n: number) {
+  const sentences = proseSentences(text);
+  return sentences.length > n ? firstSentence(sentences[n]) : firstSentence(text);
+}
+
+/**
+ * How many distinct ideas a topic holds: its key points when it has them, else roughly one per two
+ * prose sentences of its source. A topic with only a name or a line of text holds one.
+ */
+export function ideasIn(source: Pick<TopicSource, "topic" | "text">) {
+  const points = new Set((source.topic.key_points ?? []).map((point) => point.name.trim().toLowerCase())).size;
+  if (points >= 2) return points;
+  return Math.max(1, Math.floor(proseSentences(source.text).length / 2));
+}
+
+/**
+ * Scenes per topic: one per idea, up to perTopic, and at most total across the storyboard. Every
+ * topic that fits gets one scene first, then the rest go round in topic order to topics with ideas
+ * left, so early topics do not take every scene. Topics beyond total get none.
+ */
+export function sceneBudget(ideas: number[], perTopic: number, total: number) {
+  const caps = ideas.map((count) => Math.max(1, Math.min(perTopic, count)));
+  const scenes = caps.map((_, index): number => (index < total ? 1 : 0));
+  let left = total - scenes.reduce((sum, count) => sum + count, 0);
+  while (left > 0) {
+    let added = false;
+    for (let index = 0; index < scenes.length && left > 0; index += 1) {
+      if (scenes[index] > 0 && scenes[index] < caps[index]) {
+        scenes[index] += 1;
+        left -= 1;
+        added = true;
+      }
+    }
+    if (!added) break;
+  }
+  return scenes;
 }
 
 /** A storyboard built from the topics alone, used when no model is available. */
 export function fallbackStoryboard(title: string, sources: TopicSource[], language: "en" | "roman_ur"): Storyboard {
   const ur = language === "roman_ur";
-  const panels = sources.map((item) => {
-    const points = item.topic.key_points?.map((point) => point.name).slice(0, 4) ?? [];
-    const source = { key_idea: item.topic.summary, notes: points.length >= 2 ? points : [firstSentence(item.text, 140), item.topic.summary].filter(Boolean), flow: [] };
-    return {
+  const panels = sources.flatMap((item) => {
+    const points = item.topic.key_points ?? [];
+    const names = points.map((point) => point.name).slice(0, 4);
+    const source = { key_idea: item.topic.summary, notes: names.length >= 2 ? names : [firstSentence(item.text, 140), item.topic.summary].filter(Boolean), flow: [] };
+    const overview = {
       topic_id: item.topic.id,
       heading: item.topic.name,
       narration: item.topic.summary,
@@ -83,6 +143,15 @@ export function fallbackStoryboard(title: string, sources: TopicSource[], langua
       quote: firstSentence(item.text),
       source_label: item.label,
     } satisfies StoryPanel;
+    // Further scenes walk through the topic's key points, one idea each.
+    const more = points
+      .filter((point) => point.summary)
+      .slice(0, Math.max(0, (item.scenes ?? 1) - 1))
+      .map((point, index) => {
+        const scene = { key_idea: point.summary as string, notes: [point.summary as string], flow: [] };
+        return { topic_id: item.topic.id, heading: point.name, narration: point.summary as string, view: panelView(scene), source: scene, quote: nthSentence(item.text, index + 1), source_label: item.label } satisfies StoryPanel;
+      });
+    return [overview, ...more];
   });
   return {
     title,
@@ -96,14 +165,20 @@ export function fallbackStoryboard(title: string, sources: TopicSource[], langua
   };
 }
 
-async function sourcesFor(topics: Topic[]): Promise<TopicSource[]> {
-  return Promise.all(
-    topics.map(async (topic) => {
-      const chunks = await retrieveForConcept({ contentId: topic.content_id, sourceChunkIds: topic.source_chunk_ids.slice(0, 2), query: topic.name, limit: 2 }).catch(() => []);
+async function sourcesFor(topics: Topic[], config: AppConfig): Promise<TopicSource[]> {
+  const perTopic = config.mechanics.storyboard_scenes_per_topic;
+  const sources = await Promise.all(
+    topics.slice(0, config.mechanics.storyboard_panels).map(async (topic) => {
+      // A topic with several key points reads one chunk per point, so each scene has its own facts.
+      const wide = (topic.key_points?.length ?? 0) >= 2 && perTopic > 1;
+      const ids = [...new Set([...topic.source_chunk_ids.slice(0, 2), ...(wide ? (topic.key_points ?? []).flatMap((point) => point.source_chunk_ids?.slice(0, 1) ?? []) : [])])].slice(0, 4);
+      const chunks = await retrieveForConcept({ contentId: topic.content_id, sourceChunkIds: ids, query: topic.name, limit: wide ? 4 : 3 }).catch(() => []);
       const joined = chunks.map((chunk) => chunk.text).join("\n");
-      return { topic, text: joined.slice(0, 1_400) || topic.summary, label: chunks[0] ? `Source ${chunks[0].idx + 1}` : "Your material" };
+      return { topic, text: joined.slice(0, wide ? 2_800 : 2_000) || topic.summary, label: chunks[0] ? `Source ${chunks[0].idx + 1}` : "Your material" };
     }),
   );
+  const scenes = sceneBudget(sources.map(ideasIn), perTopic, config.mechanics.storyboard_panels);
+  return sources.map((source, index) => ({ ...source, scenes: scenes[index] })).filter((source) => source.scenes > 0);
 }
 
 export async function generateStoryboard(input: {
@@ -115,7 +190,8 @@ export async function generateStoryboard(input: {
   requestId?: string;
   userHash?: string;
 }): Promise<Storyboard> {
-  const sources = await sourcesFor(input.topics.slice(0, input.config.mechanics.storyboard_panels));
+  const sources = await sourcesFor(input.topics, input.config);
+  const sceneCount = sources.reduce((sum, item) => sum + (item.scenes ?? 1), 0);
   if (!sources.length) return fallbackStoryboard(input.title, sources, input.language);
   const ur = input.language === "roman_ur";
   try {
@@ -123,8 +199,8 @@ export async function generateStoryboard(input: {
       task: "fast",
       model: process.env.LLM_FAST_MODEL ?? "",
       jsonMode: true,
-      maxTokens: 3_500,
-      timeoutMs: 40_000,
+      maxTokens: Math.min(9_000, 1_000 + sceneCount * 550),
+      timeoutMs: 55_000,
       temperature: 0.7,
       purpose: "storyboard.generate",
       requestId: input.requestId,
@@ -138,7 +214,7 @@ export async function generateStoryboard(input: {
           role: "user",
           content: `Write a storyboard for the journey "${input.title}". Story theme: ${input.storyTheme.slice(0, 300)}
 - A cast of 2 or 3 people with first names and roles that belong to the world of the material${ur ? " (Pakistani names)" : ""}. Something is at stake for them. Each panel moves the story forward, and the closing leaves them better off because of what they now understand.
-- Exactly one panel per topic below, in the same order. "topic" is the topic ref (T1, T2...).
+- Each topic below says how many scenes it gets. Give that many panels for it, each on a DIFFERENT idea from that topic's source text, so the learner meets several distinct ideas before any question. If the source truly holds fewer distinct ideas, give fewer panels for that topic rather than repeating one. Keep the topics in the order given. "topic" is the topic ref (T1, T2...).
 - Every scene, person and example comes from the world of the material itself. Never borrow a setting from an unrelated field.
 - You may invent the people and the scenery. You may NEVER invent a fact, figure, rule or claim about the subject: every fact comes from that topic's source text.
 - "narration": two short sentences, at most 40 words, present tense, plain prose.
@@ -147,7 +223,7 @@ export async function generateStoryboard(input: {
 - ${visualPromptShape}
 - Vary the "best" view: never the same one twice in a row.
 Return {"title":string,"setting":string (one sentence),"cast":[{"name","role"}],"panels":[{"topic","heading","narration","key_idea","notes":[],"flow":[],"visual":{},"quote"}],"closing":string (one or two sentences inviting the learner to start the first mission)}
-${sources.map((item, index) => `<topic ref="T${index + 1}" name="${item.topic.name.replace(/"/g, "'")}">\n${item.text}\n</topic>`).join("\n")}
+${sources.map((item, index) => `<topic ref="T${index + 1}" name="${item.topic.name.replace(/"/g, "'")}" scenes="${item.scenes ?? 1}">\n${item.text}\n</topic>`).join("\n")}
 ${languageRule(input.language)}`,
         },
       ],
@@ -244,7 +320,11 @@ export async function illustrateStoryboard(input: { journeyId: string; config: A
     // Re-read the plan so a change made meanwhile is not overwritten.
     const latest = (await supabaseRequest<Array<{ plan: JourneyRow["plan"] }>>(`journeys?id=eq.${input.journeyId}&select=plan`))?.[0]?.plan;
     if (!latest?.storyboard) return;
-    const panels = latest.storyboard.panels.map((panel) => (images.get(panel.topic_id) ? { ...panel, image: images.get(panel.topic_id) } : panel));
+    // A topic's image goes on its first scene; its other scenes keep their drawn views.
+    const panels = latest.storyboard.panels.map((panel, index, all) => {
+      const first = all.findIndex((other) => other.topic_id === panel.topic_id) === index;
+      return first && images.get(panel.topic_id) ? { ...panel, image: images.get(panel.topic_id) } : panel;
+    });
     await supabaseRequest(`journeys?id=eq.${input.journeyId}`, {
       method: "PATCH",
       headers: { Prefer: "return=minimal" },

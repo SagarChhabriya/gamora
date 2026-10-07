@@ -108,7 +108,7 @@ export function StoryboardPlayer({ storyboard, startHref, onFinish, speak, silen
     <section aria-roledescription="storyboard" aria-label={storyboard.title} className="space-y-4">
       <ol className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1" aria-label="Panels">
         {panels.map((item, position) => (
-          <li key={item.topic_id} className="shrink-0">
+          <li key={`${item.topic_id}-${position}`} className="shrink-0">
             <button
               type="button"
               onClick={() => go(position)}

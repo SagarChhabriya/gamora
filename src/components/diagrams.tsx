@@ -31,7 +31,7 @@ function Arrow({ className }: { className?: string }) {
 
 export function StickyNotes({ notes }: { notes: string[] }) {
   return (
-    <ul className="grid gap-3 sm:grid-cols-2">
+    <ul className={cx("grid gap-3 sm:grid-cols-2", notes.length > 4 && "lg:grid-cols-3")}>
       {notes.map((note, index) => (
         <li
           key={note}

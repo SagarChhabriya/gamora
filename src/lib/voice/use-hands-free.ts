@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 type Voice = {
   speak: (text: string, options?: { onEnd?: () => void }) => boolean;
   silence: () => void;
-  start: () => void;
+  start: (options?: { autoStop?: boolean }) => void;
   stop: () => void;
 };
 
@@ -33,7 +33,7 @@ export function useHandsFree(voice: Voice) {
   }, [voice]);
 
   const listen = useCallback(() => {
-    if (onRef.current && !busyRef.current && !playing.current) voiceRef.current.start();
+    if (onRef.current && !busyRef.current && !playing.current) voiceRef.current.start({ autoStop: true });
   }, []);
 
   useEffect(() => {

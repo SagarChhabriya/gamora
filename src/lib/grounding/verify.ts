@@ -16,14 +16,57 @@ const verdictItem = z.object({
 });
 const verdictSchema = z.preprocess(
   (value) => (Array.isArray(value) ? { verdicts: value } : value),
-  z.object({ verdicts: z.array(verdictItem) }),
+  z.object({
+    verdicts: z.array(verdictItem),
+    answerable: z.preprocess((value) => (typeof value === "string" ? value.toLowerCase().trim() === "true" : value), z.boolean()).optional(),
+    answerable_reason: z.string().max(400).default(""),
+  }),
 );
 
 export type VerifyResult = {
   ok: boolean;
   unsupported: Array<{ claim: string; reason: string }>;
   checked: number;
+  /** False when a learner could not answer the question from what they were shown. Unset when not checked. */
+  answerable?: boolean;
+  answerableReason?: string;
 };
+
+/** The question a learner will be asked, with everything they can see when answering it. */
+export type QuestionCheck = { question: string; shown: string; expected: string[] };
+
+/** Steps the learner answers from the material. Lessons teach, and reflections ask about confidence. */
+const answeredTypes = new Set(["explain_ask", "scenario", "spot_error", "ordering", "roleplay", "teach_back", "spaced_recall", "capstone", "crossroads"]);
+
+/**
+ * What the learner sees when this question is asked: the lesson they just read, the activity text
+ * and its choices. Null for steps that are not answered from the material.
+ */
+export function questionCheckFor(activity: Activity, lessonShown?: string): QuestionCheck | null {
+  if (!answeredTypes.has(activity.type)) return null;
+  const choices = [
+    ...(activity.options ?? []).map((option) => `Choice: ${option.text}`),
+    ...(activity.steps ?? []).map((step) => `Step: ${step.text}`),
+    ...(activity.items ?? []).map((item) => `Item: ${item.text}`),
+    ...(activity.roleplay ? [`${activity.roleplay.character}: ${activity.roleplay.situation} ${activity.roleplay.opening}`] : []),
+  ];
+  const shown = [lessonShown ? `Lesson just read: ${lessonShown}` : "", activity.display_text, ...choices].filter(Boolean).join("\n").slice(0, 2_400);
+  const expected = activity.options?.length
+    ? activity.options.filter((option) => option.correct).map((option) => `Correct choice: ${option.text}`)
+    : activity.expected_points.map((point) => point.text);
+  return { question: activity.prompt, shown, expected: expected.slice(0, 5) };
+}
+
+/**
+ * A free check that catches an unanswerable open question without calling a model: one with no
+ * expected answer, or whose expected answer only repeats the topic's name.
+ */
+export function plainlyUnanswerable(activity: Activity) {
+  if (!answeredTypes.has(activity.type) || activity.type === "roleplay" || activity.options?.length || activity.steps?.length || activity.items?.length) return false;
+  const same = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  const name = same(activity.concept_name);
+  return activity.expected_points.map((point) => same(point.text)).filter((text) => text && text !== name).length === 0;
+}
 
 /** Claims a learner will read as fact: the lesson, expected points, and answer consequences. */
 export function claimsFromActivity(activity: Activity) {
@@ -50,8 +93,11 @@ export async function verifyClaims(input: {
   userHash?: string;
   /** "reasoning" gives an independent, larger judge for evals. */
   task?: "fast" | "reasoning";
+  /** Also judge, in the same call, whether a learner could answer this question from what they see. */
+  question?: QuestionCheck | null;
 }): Promise<VerifyResult> {
   if (input.strictness === "off" || !input.claims.length) return { ok: true, unsupported: [], checked: 0 };
+  const question = input.question;
   try {
     const response = await generateWithFallback({
       task: input.task ?? "fast",
@@ -70,8 +116,8 @@ export async function verifyClaims(input: {
         {
           role: "user",
           content: `For each claim, decide if the source chunks support it. Numbers, names, thresholds, time limits and deadlines must match exactly. Friendly framing, questions, story details that are clearly fictional scene setting, and encouragement do not need support; mark them "supported".
-Return {"verdicts":[{"claim_id":"1","verdict":"supported"|"partial"|"unsupported","reason":string}]}
-<claims>
+${question ? `Then judge the question below. "answerable" is true only if a learner who knows nothing beyond what they are shown could give the expected answer. It is false when the question needs facts that are not shown, asks about personal experience or real-life use the material never describes, or when what is shown is only a name or heading with nothing to reason about.\n` : ""}Return {"verdicts":[{"claim_id":"1","verdict":"supported"|"partial"|"unsupported","reason":string}]${question ? `,"answerable":boolean,"answerable_reason":string (one sentence)` : ""}}
+${question ? `<question>\n${question.question}\n</question>\n<shown_to_learner>\n${question.shown}\n</shown_to_learner>\n<expected_answer>\n${question.expected.join("\n") || "(none given)"}\n</expected_answer>\n` : ""}<claims>
 ${input.claims.map((claim, index) => `${index + 1}. ${claim}`).join("\n")}
 </claims>
 <source>
@@ -85,7 +131,8 @@ ${sourceBlock(input.chunks)}
       .filter((verdict) => verdict.verdict === "unsupported")
       .map((verdict) => ({ claim: input.claims[Number(verdict.claim_id) - 1] ?? "", reason: verdict.reason }));
     const ok = input.strictness === "strict" ? unsupported.length === 0 : unsupported.length <= 1;
-    return { ok, unsupported, checked: input.claims.length };
+    const answerable = question ? parsed.answerable : undefined;
+    return { ok, unsupported, checked: input.claims.length, answerable, answerableReason: answerable === false ? parsed.answerable_reason : undefined };
   } catch {
     // If the verifier itself is unavailable, do not block learning, but mark the content unverified.
     return { ok: true, unsupported: [], checked: 0 };
@@ -162,10 +209,18 @@ export async function generateGroundedActivity(
   input: Parameters<typeof generateActivity>[0],
   onCheck?: (check: VerifyResult & { attempt: number; type: string }) => Promise<void> | void,
 ): Promise<Activity> {
+  let retryNote: string | undefined;
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const activity = await generateActivity(input);
+    const activity = await generateActivity({ ...input, retryNote });
     // A step built without the model (quoting the source) needs no second check.
     if (activity.grounded !== "unverified") return activity;
+    // An open question with nothing to answer from is rebuilt at once, without spending a check on it.
+    if (plainlyUnanswerable(activity)) {
+      retryNote = "The last question had no answer in the material. Ask only about a fact or step the source states, and list it in expected_points.";
+      await onCheck?.({ ok: false, unsupported: [], checked: 0, answerable: false, answerableReason: "no expected answer", attempt, type: activity.type });
+      continue;
+    }
+    // One call checks both the facts and whether the question can be answered from what is shown.
     const check = await verifyClaims({
       claims: claimsFromActivity(activity),
       chunks: input.chunks,
@@ -174,9 +229,14 @@ export async function generateGroundedActivity(
       userHash: input.userHash,
       // Strict mode checks with the larger model. It also spreads load across per-model rate limits.
       task: input.config.grounding.verifier === "strict" ? "reasoning" : "fast",
+      question: questionCheckFor(activity, input.shown),
     });
     await onCheck?.({ ...check, attempt, type: activity.type });
-    if (check.ok) return { ...activity, grounded: check.checked ? "verified" : "unverified" };
+    if (check.ok && check.answerable !== false) return { ...activity, grounded: check.checked ? "verified" : "unverified" };
+    retryNote =
+      check.answerable === false
+        ? `The last question could not be answered from what the learner sees (${(check.answerableReason ?? "").slice(0, 200)}). Ask only about facts in the lesson or the display_text, and put the answer in expected_points.`
+        : undefined;
   }
   return { ...fallbackActivity(input), grounded: "abstained" };
 }

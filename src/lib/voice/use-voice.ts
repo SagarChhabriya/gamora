@@ -91,9 +91,19 @@ function fetchSpeech(text: string, language: Language): Promise<string | null> {
   return pending;
 }
 
+/** Whether the admin wants push to talk to use the server transcriber. Asked once per page visit. */
+let serverFirst: Promise<boolean> | null = null;
+function serverTranscriberFirst() {
+  serverFirst ??= authFetch("/api/voice/stt")
+    .then(async (response) => (response.ok ? Boolean(((await response.json()) as { server_first?: boolean }).server_first) : false))
+    .catch(() => false);
+  return serverFirst;
+}
+
 /**
- * Voice input and output. Web Speech first, then recorded audio to the Whisper fallback route,
- * and always a text fallback. Raw audio is never stored.
+ * Voice input and output. Web Speech first, then recorded audio to the server transcriber (Whisper
+ * or Deepgram, set by the admin), and always a text fallback. The admin can send push to talk to
+ * the server first, which hears Urdu better than most browsers. Raw audio is never stored.
  */
 export function useVoice(language: Language, onText?: (text: string) => void, onFinal?: (text: string) => void) {
   const [listening, setListening] = useState(false);
@@ -167,10 +177,20 @@ export function useVoice(language: Language, onText?: (text: string) => void, on
     }
   }, [emit, language]);
 
-  const start = useCallback(() => {
+  const [preferServer, setPreferServer] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void serverTranscriberFirst().then((value) => live && setPreferServer(value));
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  /** Starts listening. Hands-free passes autoStop, which needs the browser recogniser to hear silence. */
+  const start = useCallback((options?: { autoStop?: boolean }) => {
     setNote(null);
     const Ctor = recognitionCtor();
-    if (!Ctor) {
+    if (!Ctor || (preferServer && !options?.autoStop && typeof MediaRecorder !== "undefined")) {
       void startWhisper();
       return;
     }
@@ -213,7 +233,7 @@ export function useVoice(language: Language, onText?: (text: string) => void, on
     } catch {
       void startWhisper();
     }
-  }, [emit, language, startWhisper]);
+  }, [emit, language, startWhisper, preferServer]);
 
   const stop = useCallback(() => {
     recognition.current?.stop();

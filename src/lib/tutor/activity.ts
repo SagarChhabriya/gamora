@@ -65,6 +65,10 @@ export type ActivityInput = {
   carryOver?: string;
   /** Every topic a capstone case covers. The first is concept.id. */
   conceptIds?: string[];
+  /** The lesson the learner just read on this concept, when this step checks it. */
+  shown?: string;
+  /** Why the last attempt was rejected, so the rebuilt step avoids the same problem. */
+  retryNote?: string;
   config: AppConfig;
   requestId?: string;
   userHash?: string;
@@ -96,8 +100,9 @@ async function generateActivityOnce(input: ActivityInput & { type: PlanStepType 
         content: `Create a ${type} activity for the concept "${concept.name}" (${concept.summary.slice(0, 300)}${concept.focus ? ` ${concept.focus.slice(0, 400)}` : ""}).
 Difficulty ${input.difficulty}/5: ${difficultyText(input.difficulty)}. Pace: ${input.pace}. ${input.intent ? `Intent: ${input.intent}.` : ""}
 ${input.workedExample ? "The learner struggled just now. Start display_text with a short worked example from the source before the question.\n" : ""}${input.learnerContext ? `Learner context (reuse their words when helpful): ${input.learnerContext.slice(0, 300)}\n` : ""}${input.storyContext ? `${input.storyContext}\n` : ""}${input.carryOver ? `Continue from the learner's last decision. What it led to: ${input.carryOver.slice(0, 400)} Open display_text by picking up from that outcome, then set the new situation.\n` : ""}
-${shapes[type]}
-Return JSON with: "title" (3 to 6 words), "display_text", "prompt", "hints" (2 hints, gentle to specific), "expected_points" ([{"text","refs":["S1"]}] what a good answer contains, each tied to a chunk ref), "source_refs" (chunk refs used), plus the type specific fields above.
+${input.shown ? `The learner just read this lesson, and this step checks it: <lesson>${input.shown.slice(0, 900)}</lesson>\n` : ""}${shapes[type]}
+The question must be answerable from what the learner is shown (the lesson above, display_text and any choices) together with the source. Never ask about personal experience, their job or real-life use unless the source describes it. If the source only names something, ask about what it does state.
+${input.retryNote ? `${input.retryNote}\n` : ""}Return JSON with: "title" (3 to 6 words), "display_text", "prompt", "hints" (2 hints, gentle to specific), "expected_points" ([{"text","refs":["S1"]}] what a good answer contains, each tied to a chunk ref), "source_refs" (chunk refs used), plus the type specific fields above.
 Use only facts from the source chunks. Cite refs exactly as given (S1, S2...).
 <source>
 ${sourceBlock(chunks)}
@@ -135,7 +140,7 @@ function generateStep(input: ActivityInput, retry: boolean) {
 const lessonSchema = z.object({
   title: z.string().min(1).max(120),
   key_idea: z.string().min(1).max(400),
-  notes: z.array(z.string().min(1).max(200)).min(1).max(4),
+  notes: z.array(z.string().min(1).max(200)).min(1).max(10),
   flow: z.array(z.string().min(1).max(120)).max(6).default([]),
   example: z.string().max(500).default(""),
   source_refs: refList,
@@ -163,7 +168,7 @@ async function generateLesson(input: ActivityInput, retry: boolean): Promise<Act
         role: "user",
         content: `Teach the concept "${concept.name}" (${concept.summary.slice(0, 300)}${concept.focus ? ` ${concept.focus.slice(0, 400)}` : ""}) as a short visual lesson. This comes BEFORE any question, so teach, do not ask.
 Difficulty ${input.difficulty}/5: ${difficultyText(input.difficulty)}.
-${input.storyContext ? `${input.storyContext} The example may feature these people.\n` : ""}Return JSON: {"title": 3 to 6 words, "key_idea": one sentence with the single most important idea, "notes": 2 to 4 sticky notes, each a fact a beginner must remember in at most 14 words, "flow": if the source describes a process, sequence or cause and effect, 3 to 5 short step labels in order (at most 8 words each), otherwise [], "example": one short concrete example from the source context in at most 40 words, "source_refs": ["S1"], ${visualPromptShape}}.
+${input.storyContext ? `${input.storyContext} The example may feature these people.\n` : ""}Return JSON: {"title": 3 to 6 words, "key_idea": one sentence with the single most important idea, "notes": 4 to 6 sticky notes (never fewer than 3, never more than 8), each a DIFFERENT fact from the source a beginner must remember, in at most 14 words, never just repeating the title or the key idea, "flow": if the source describes a process, sequence or cause and effect, 3 to 5 short step labels in order (at most 8 words each), otherwise [], "example": one short concrete example from the source context in at most 40 words, "source_refs": ["S1"], ${visualPromptShape}}.
 Never invent a number, date or comparison the source does not state.
 Use only facts from the source chunks. Cite refs exactly as given (S1, S2...).
 <source>
@@ -178,6 +183,7 @@ ${languageRule(input.language)}${retry ? `\n${retryInRomanUrdu}` : ""}`,
   // Numbers and dates are kept only when the source chunks state them.
   const visual = groundVisual(parseLessonVisual(json.visual), chunks.map((chunk) => chunk.text).join("\n"));
   const cited = refsToIds(raw.source_refs, chunks);
+  const notes = lessonNotes(raw.notes, [raw.title, raw.key_idea, concept.name], chunks);
   const refs = raw.source_refs.length ? raw.source_refs : chunks.slice(0, 1).map((chunk) => chunk.ref);
   return {
     id: randomUUID(),
@@ -189,10 +195,10 @@ ${languageRule(input.language)}${retry ? `\n${retryInRomanUrdu}` : ""}`,
     display_text: raw.key_idea,
     prompt: lessonPrompt(input.language),
     hints: [],
-    expected_points: raw.notes.map((text) => ({ text, refs })),
+    expected_points: notes.map((text) => ({ text, refs })),
     source_chunk_ids: cited.length ? cited : chunks.slice(0, 2).map((chunk) => chunk.id),
     grounded: "unverified",
-    lesson: { key_idea: raw.key_idea, notes: raw.notes, flow: raw.flow.length >= 3 ? raw.flow.slice(0, 5) : [], example: raw.example, visual },
+    lesson: { key_idea: raw.key_idea, notes, flow: raw.flow.length >= 3 ? raw.flow.slice(0, 5) : [], example: raw.example, visual },
   };
 }
 
@@ -260,7 +266,7 @@ export function fallbackActivity(input: ActivityInput): Activity {
       source_chunk_ids: chunks.slice(0, 2).map((chunk) => chunk.id),
       // Built without the model: it quotes the source, so it is labelled that way.
       grounded: "abstained",
-      lesson: { key_idea: concept.summary, notes: (sentences.length ? sentences.slice(0, 3) : [concept.summary]).map((text) => text.slice(0, 200)), flow: [], example: "" },
+      lesson: { key_idea: concept.summary, notes: lessonNotes([], [concept.name, concept.summary], chunks), flow: [], example: "" },
     };
   }
   const reflection = input.type === "reflection";
@@ -277,13 +283,40 @@ export function fallbackActivity(input: ActivityInput): Activity {
         ? `Aap "${concept.name}" ke baare mein kitna confident mehsoos karte hain, 1 se 5?`
         : `How confident do you feel about "${concept.name}", from 1 to 5?`
       : ur
-        ? "Apne alfaaz mein batayein, aap is ko asal zindagi mein kahan use karenge?"
-        : "In your own words, where would you use this in real life?",
+        ? `Upar diye gaye hisse ke mutabiq, "${concept.name}" ke baare mein aapki material kya kehti hai? Apne alfaaz mein batayein.`
+        : `According to the passage above, what does your material say about "${concept.name}"? Put it in your own words.`,
     hints: [ur ? "Source ki pehli line dobara parhein." : "Re-read the first line of the source.", concept.summary.slice(0, 200)],
     expected_points: [{ text: concept.summary.slice(0, 300), refs: chunks[0] ? [chunks[0].ref] : [] }],
     source_chunk_ids: chunks.slice(0, 2).map((chunk) => chunk.id),
     grounded: "abstained",
   };
+}
+
+const sameText = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+
+/**
+ * The sticky notes of a lesson: 3 to 8 distinct facts. Notes that only repeat the title, the key idea
+ * or another note are dropped. When fewer than 3 remain, sentences quoted from the source fill the
+ * gap, so the notes stay grounded. Thin material gives fewer notes rather than invented ones.
+ */
+export function lessonNotes(notes: string[], repeats: string[], chunks: Array<{ text: string }>, min = 3, max = 8) {
+  const seen = new Set(repeats.map(sameText).filter(Boolean));
+  const kept: string[] = [];
+  const add = (note: string) => {
+    const key = sameText(note);
+    if (!key || seen.has(key) || kept.length >= max) return;
+    seen.add(key);
+    kept.push(note.trim().slice(0, 200));
+  };
+  notes.forEach(add);
+  if (kept.length < min) {
+    const sentences = chunks.flatMap((chunk) => chunk.text.replace(/\s+/g, " ").split(/(?<=[.!?])\s+/)).filter(isProse);
+    for (const sentence of sentences) {
+      if (kept.length >= min) break;
+      add(sentence);
+    }
+  }
+  return kept;
 }
 
 /** True for a sentence of ordinary prose: mostly letters, a sensible length, no data or markup. */

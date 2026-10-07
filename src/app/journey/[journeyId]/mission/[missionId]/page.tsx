@@ -263,7 +263,7 @@ function Mission() {
 
   const voiceButton =
     !textOnly && voice.sttSupported ? (
-      <Button type="button" variant="secondary" onClick={voice.listening ? voice.stop : voice.start} aria-pressed={voice.listening} aria-label={voice.listening ? "Stop voice input" : "Answer with your voice"}>
+      <Button type="button" variant="secondary" onClick={() => (voice.listening ? voice.stop() : voice.start())} aria-pressed={voice.listening} aria-label={voice.listening ? "Stop voice input" : "Answer with your voice"}>
         {voice.listening ? "● Listening, tap to stop" : "🎙 Speak"}
       </Button>
     ) : null;

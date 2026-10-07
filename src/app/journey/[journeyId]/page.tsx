@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { AppShell } from "@/components/app-shell";
+import { MissionPath } from "@/components/mission-path";
 import { Alert, Eyebrow, Meter, cx } from "@/components/ui";
 import { authFetch } from "@/lib/auth/client";
 import type { MissionView } from "@/lib/journey/load";
@@ -118,7 +119,7 @@ function JourneyMap() {
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-accent">{seen ? "Storyboard" : "Start here"}</p>
             <h2 className="mt-1 text-xl font-semibold">{seen ? "Watch the storyboard again" : "See the whole journey first"}</h2>
             <p className="mt-1 text-sm text-ink/65">
-              {data.storyboard.panels} illustrated panels, about {Math.max(1, Math.round((data.storyboard.panels * 10) / 60))} minute
+              {data.storyboard.panels} illustrated scenes, about {Math.max(1, Math.round((data.storyboard.panels * 10) / 60))} minute
               {Math.round((data.storyboard.panels * 10) / 60) > 1 ? "s" : ""}. Every quote comes from your material.
             </p>
           </div>
@@ -132,10 +133,12 @@ function JourneyMap() {
       ) : null}
 
       <section aria-label="Missions" data-tour="missions">
-        <ol className="relative space-y-4 border-l-2 border-ink/15 pl-6">
-          {data.missions.map((mission) => {
+        <MissionPath
+          missions={data.missions}
+          journeyId={data.journey.id}
+          renderCard={(mission) => {
             const locked = mission.status === "locked";
-            const body = (
+            return (
               <div
                 className={cx(
                   "border p-5 transition",
@@ -149,10 +152,7 @@ function JourneyMap() {
                   </span>
                   <span>{Math.round(mission.mastery * 100)}% mastery</span>
                 </div>
-                <h2 className="mt-2 text-xl font-semibold">
-                  {locked ? "🔒 " : mission.status === "completed" ? "✓ " : ""}
-                  {mission.title}
-                </h2>
+                <h2 className="mt-2 text-xl font-semibold">{mission.title}</h2>
                 <p className="mt-2 text-sm leading-6">{mission.story}</p>
                 <p className="mt-3 flex flex-wrap gap-2 text-xs">
                   {mission.activity_types.map((type) => (
@@ -169,26 +169,8 @@ function JourneyMap() {
                 {mission.lock_reason ? <p className="mt-3 text-sm font-medium">{mission.lock_reason}</p> : null}
               </div>
             );
-            return (
-              <li key={mission.id} className="relative">
-                <span
-                  aria-hidden="true"
-                  className={cx(
-                    "absolute -left-[33px] top-6 h-4 w-4 rounded-full border-2",
-                    mission.status === "completed" ? "border-good bg-good" : locked ? "border-ink/25 bg-paper" : "border-accent bg-paper",
-                  )}
-                />
-                {locked ? (
-                  <div aria-disabled="true">{body}</div>
-                ) : (
-                  <Link href={`/journey/${data.journey.id}/mission/${mission.id}`} className="block focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
-                    {body}
-                  </Link>
-                )}
-              </li>
-            );
-          })}
-        </ol>
+          }}
+        />
       </section>
 
       <section aria-label="Mastery heatmap" className="space-y-3" data-tour="mastery">

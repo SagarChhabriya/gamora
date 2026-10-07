@@ -6,7 +6,7 @@ import { AdminNav } from "@/components/admin-nav";
 import { AppShell } from "@/components/app-shell";
 import { Alert, Button, Card, Eyebrow, Textarea, cx } from "@/components/ui";
 import { authFetch } from "@/lib/auth/client";
-import { activityTypes, cloudVoices, personaLabels, personas, type AppConfig } from "@/lib/config/schema";
+import { activityTypes, cloudVoices, deepgramVoices, personaLabels, personas, type AppConfig } from "@/lib/config/schema";
 
 type Version = { version: number; note: string | null; is_active: boolean; created_at: string; author: string; diff: Array<{ path: string; from: unknown; to: unknown }> };
 type Payload = { active: AppConfig; active_version: number; defaults: AppConfig; versions: Version[] };
@@ -64,7 +64,8 @@ const groups: Array<{ title: string; description: string; fields: Field[] }> = [
       { path: "mechanics.streak_grace_days", label: "Streak grace days", kind: "number", min: 0, max: 7 },
       { path: "mechanics.leaderboard", label: "Leaderboard (off by default, no pressure)", kind: "toggle" },
       { path: "mechanics.storyboard", label: "Storyboard before the first mission", kind: "toggle" },
-      { path: "mechanics.storyboard_panels", label: "Storyboard panels", kind: "number", min: 3, max: 8 },
+      { path: "mechanics.storyboard_scenes_per_topic", label: "Storyboard scenes per topic (most)", kind: "number", min: 1, max: 7, hint: "One scene per idea a topic holds. A topic with little material gets fewer." },
+      { path: "mechanics.storyboard_panels", label: "Storyboard scenes in total (most)", kind: "number", min: 3, max: 24 },
       { path: "mechanics.capstone", label: "Capstone case at the end of a journey", kind: "toggle", hint: "One case that needs two or more topics at once." },
       { path: "mechanics.crossroads", label: "Crossroads decisions", kind: "toggle", hint: "At most one per mission. The choice carries into the next step." },
     ],
@@ -73,8 +74,26 @@ const groups: Array<{ title: string; description: string; fields: Field[] }> = [
     title: "Voice and media",
     description: "How the guide sounds and whether storyboards get illustrations. Costs are shown on the dashboard.",
     fields: [
-      { path: "voice.engine", label: "Voice for read aloud", kind: "select", options: ["cloud", "browser"], labels: { cloud: "Cloud voice (Urdu and English)", browser: "Device voice only" }, hint: "The cloud voice falls back to the device voice when it is busy." },
-      { path: "voice.cloud_voice", label: "Cloud voice", kind: "select", options: [...cloudVoices] },
+      {
+        path: "voice.engine",
+        label: "Voice for read aloud",
+        kind: "select",
+        options: ["cloud", "deepgram", "browser"],
+        labels: { cloud: "Gemini cloud voice (Urdu and English)", deepgram: "Deepgram Aura-2 (English; Urdu lines use Gemini)", browser: "Device voice only" },
+        hint: "Deepgram has no Urdu voice, so Roman Urdu lines are spoken by Gemini. Every cloud voice falls back to the device voice when it is busy. Deepgram needs DEEPGRAM_API_KEY.",
+      },
+      { path: "voice.cloud_voice", label: "Gemini voice", kind: "select", options: [...cloudVoices] },
+      { path: "voice.deepgram_voice", label: "Deepgram voice", kind: "select", options: [...deepgramVoices] },
+      {
+        path: "voice.stt_provider",
+        label: "Server speech to text",
+        kind: "select",
+        options: ["groq", "deepgram"],
+        labels: { groq: "Groq Whisper", deepgram: "Deepgram Nova-3 (supports Urdu)" },
+        hint: "Used when the browser cannot listen itself. Deepgram needs DEEPGRAM_API_KEY.",
+      },
+      { path: "voice.stt_server_first", label: "Push to talk uses the server transcriber", kind: "toggle", hint: "Better Urdu than most browsers, at a small cost per minute. Hands-free keeps the browser so it can hear when the learner stops." },
+      { path: "voice.cloud_backup", label: "Use the other cloud provider as a backup", kind: "toggle", hint: "When the chosen voice or transcriber fails, try the other one before the device voice or typing." },
       { path: "media.images", label: "Illustrated storyboard panels", kind: "toggle", hint: "Made once per topic and shared by every learner of that source. Needs billing on the Gemini key." },
       { path: "media.image_tier", label: "Image quality tier", kind: "select", options: ["economy", "standard"], labels: { economy: "Economy (about $0.03 per image)", standard: "Standard (about $0.045 per image)" } },
       { path: "media.monthly_budget_usd", label: "Monthly image budget (USD)", kind: "number", min: 0, max: 500, step: 1, hint: "New images stop when the month's spend reaches this. Panels keep their drawn views." },

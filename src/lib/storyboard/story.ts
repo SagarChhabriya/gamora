@@ -1,8 +1,8 @@
 import { availableViews, sourceStates, type ViewId, type ViewSource } from "@/lib/visuals/views";
 
 /**
- * A storyboard: a short illustrated preview of a journey, one panel per topic, played before the
- * first mission. Characters and scenery may be invented; facts may not. Each panel shows a quote
+ * A storyboard: a short illustrated preview of a journey, played before the first mission. Each
+ * topic gets one scene per idea it holds, so the learner meets several ideas before any question. Characters and scenery may be invented; facts may not. Each panel shows a quote
  * copied word for word from the learner's material, checked against it.
  */
 export type StoryPanel = {
@@ -31,9 +31,10 @@ export type Storyboard = {
   illustrated_at?: string;
 };
 
-/** True when illustrations are on, some panel lacks one, and the last attempt was over an hour ago. */
+/** True when illustrations are on, some topic's first scene lacks one, and the last attempt was over an hour ago. */
 export function needsIllustration(storyboard: Pick<Storyboard, "panels" | "illustrated_at">, imagesOn: boolean, now = Date.now()) {
-  if (!imagesOn || storyboard.panels.every((panel) => panel.image)) return false;
+  const firsts = storyboard.panels.filter((panel, index, all) => all.findIndex((other) => other.topic_id === panel.topic_id) === index);
+  if (!imagesOn || firsts.every((panel) => panel.image)) return false;
   return !storyboard.illustrated_at || now - new Date(storyboard.illustrated_at).getTime() > 3_600_000;
 }
 
