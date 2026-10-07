@@ -275,7 +275,7 @@ const personaText: Record<Persona, string> = {
   new_joiner: "a beginner who is new to this topic, needs clear basics",
   busy_rm: "a busy learner, short on time, wants short practical steps",
   expert: "a confident expert, skip basics, prefers challenging application",
-  low_bandwidth: "a learner on a slow connection or small phone, text only, short messages",
+  low_bandwidth: "a learner on a slow connection or small phone, short messages and light pages",
 };
 
 export async function planJourney(input: {

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { AppShell } from "@/components/app-shell";
+import { LeaderboardCard } from "@/components/leaderboard-card";
 import { showNotices, type NoticeMessage } from "@/components/llm-notices";
 import { ReviewCard } from "@/components/review-card";
 import { RouteChooser } from "@/components/route-chooser";
@@ -155,6 +156,8 @@ function Home({ session }: { session: SessionPayload }) {
           </ul>
         )}
       </section>
+
+      <LeaderboardCard />
 
       {library.length > 0 && (
         <section aria-label="Ready to learn" className="space-y-4">

@@ -97,4 +97,6 @@ export type SessionState = PolicyState & {
   xp_earned: number;
   reasons: AdaptationReason[];
   text_only: boolean;
+  /** True once the learner switched text only on or off themselves. */
+  text_only_chosen?: boolean;
 };

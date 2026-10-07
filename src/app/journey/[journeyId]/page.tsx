@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { AppShell } from "@/components/app-shell";
+import { LeaderboardCard } from "@/components/leaderboard-card";
 import { MissionPath } from "@/components/mission-path";
 import { Alert, Eyebrow, Meter, cx } from "@/components/ui";
 import { authFetch } from "@/lib/auth/client";
@@ -191,6 +192,8 @@ function JourneyMap() {
           ))}
         </ul>
       </section>
+
+      <LeaderboardCard />
 
       <section aria-label="Badges" className="space-y-3">
         <h2 className="text-xl font-semibold">Badges</h2>

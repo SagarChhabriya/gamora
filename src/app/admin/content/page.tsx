@@ -59,8 +59,8 @@ function ContentAdmin() {
                 <th className="py-2">Title</th>
                 <th>Status</th>
                 <th>Language</th>
-                <th className="text-right">Sources</th>
-                <th>Added</th>
+                <th className="px-4 text-right">Passages</th>
+                <th className="px-4">Added</th>
                 <th className="text-right">Shared with learners</th>
               </tr>
             </thead>
@@ -70,8 +70,8 @@ function ContentAdmin() {
                   <td className="py-3 font-medium">{content.title}</td>
                   <td>{content.status}</td>
                   <td>{content.language ?? "unknown"}</td>
-                  <td className="text-right tabular-nums">{content.chunk_count}</td>
-                  <td>{new Date(content.created_at).toLocaleDateString()}</td>
+                  <td className="px-4 text-right tabular-nums">{content.chunk_count}</td>
+                  <td className="whitespace-nowrap px-4 tabular-nums">{new Date(content.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</td>
                   <td className="text-right">
                     <Button variant={content.shared ? "primary" : "secondary"} className="min-h-9 px-3 py-1 text-xs" disabled={content.status !== "ready"} onClick={() => void toggle(content)} aria-pressed={content.shared}>
                       {content.shared ? "Shared" : "Share"}

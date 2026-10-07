@@ -484,10 +484,13 @@ export async function* runTurn(user: AuthUser, body: TurnRequest, requestId: str
   const prior = profileRows?.[0]?.onboarding?.prior;
   const [concepts, session] = await Promise.all([
     loadConcepts([...mission.concept_ids, ...(mission.activities ?? []).map((item) => item.concept_id)]),
-    getOrCreateSession({ user, mission, journey, config, persona, language, textOnly: persona === "low_bandwidth" || config.ui.text_only_default, practice: body.action === "practice", prior }),
+    getOrCreateSession({ user, mission, journey, config, persona, language, textOnly: config.ui.text_only_default, practice: body.action === "practice", prior }),
   ]);
   const ctx: Ctx = { user, requestId, config, journey, mission, concepts };
   const state = session.state;
+  // Sessions started before voice stayed on for slow connections were text only by learner type,
+  // not by choice. Voice comes back for them unless the learner or the admin chose text only.
+  if (state.text_only && !state.text_only_chosen && !config.ui.text_only_default && state.persona === "low_bandwidth") state.text_only = false;
 
   if (body.action === "start" || body.action === "practice") {
     const [history, xp] = await Promise.all([sessionHistory(session.id), stats(user.id)]);
@@ -523,12 +526,12 @@ export async function* runTurn(user: AuthUser, body: TurnRequest, requestId: str
       state.persona = body.persona;
       state.difficulty = fresh.difficulty;
       state.pace = fresh.pace;
-      state.text_only = body.persona === "low_bandwidth" ? true : state.text_only;
       reasons.push({ code: "persona_switch", text: `Adapting for ${personaLabels[body.persona].toLowerCase()}: level ${fresh.difficulty}, ${fresh.pace} pace.` });
       await supabaseRequest(`profiles?id=eq.${user.id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ persona: body.persona }) });
     }
     if (body.action === "set_text_only" && typeof body.text_only === "boolean" && body.text_only !== state.text_only) {
       state.text_only = body.text_only;
+      state.text_only_chosen = true;
       reasons.push({ code: "text_only", text: body.text_only ? "Text only mode on. Voice and heavy content are off." : "Voice and rich content back on." });
     }
     await logEvent({ request_id: requestId, user_hash: user.userHash, type: "adapt.decision", payload: { mission_id: mission.id, reasons: reasons.map((reason) => reason.code), manual: true } });

@@ -62,7 +62,7 @@ const groups: Array<{ title: string; description: string; fields: Field[] }> = [
       { path: "mechanics.xp.self_corrected", label: "XP for self correction", kind: "number", min: 0, max: 100 },
       { path: "mechanics.xp.mission_complete", label: "XP for a mission", kind: "number", min: 0, max: 500 },
       { path: "mechanics.streak_grace_days", label: "Streak grace days", kind: "number", min: 0, max: 7 },
-      { path: "mechanics.leaderboard", label: "Leaderboard (off by default, no pressure)", kind: "toggle" },
+      { path: "mechanics.leaderboard", label: "Leaderboard (off by default, no pressure)", kind: "toggle", hint: "Learners see it on Home and on each journey map: XP ranking of real learners, first names only." },
       { path: "mechanics.storyboard", label: "Storyboard before the first mission", kind: "toggle" },
       { path: "mechanics.storyboard_scenes_per_topic", label: "Storyboard scenes per topic (most)", kind: "number", min: 1, max: 7, hint: "One scene per idea a topic holds. A topic with little material gets fewer." },
       { path: "mechanics.storyboard_panels", label: "Storyboard scenes in total (most)", kind: "number", min: 3, max: 24 },

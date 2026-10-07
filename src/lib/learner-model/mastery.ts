@@ -17,7 +17,8 @@ export function decayed(row: MasteryRow, config: AppConfig, now = Date.now()) {
 }
 
 /**
- * Weighted evidence update. Gains shrink as mastery rises, losses shrink as confidence rises.
+ * Weighted evidence update. Gains shrink as mastery rises, losses shrink as confidence rises, and
+ * no single setback removes more than half of what was built, so one answer never decides a level.
  * Simple and explainable, not a psychometric claim (ADR-005).
  */
 export function applyEvidence(
@@ -31,7 +32,7 @@ export function applyEvidence(
   for (const { signal, strength } of signals) {
     const weight = config.mastery.evidence_weights[signal] ?? 0.5;
     const delta = weight * strength * config.mastery.step;
-    const scaled = delta >= 0 ? delta * (1 - mastery * 0.5) : delta * (1 - row.confidence * 0.5);
+    const scaled = delta >= 0 ? delta * (1 - mastery * 0.5) : Math.max(delta * (1 - row.confidence * 0.5), -mastery * 0.5);
     mastery = Math.max(0, Math.min(1, mastery + scaled));
     weighted += weight;
   }

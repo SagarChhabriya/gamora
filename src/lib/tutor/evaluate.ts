@@ -43,7 +43,10 @@ export function signalsFor(input: {
   const { type, correctness, attempts, hintsUsed, selfCorrection } = input;
   const signals: Array<{ signal: EvidenceSignal; strength: number }> = [];
   if (type === "spaced_recall") {
-    signals.push(correctness >= 0.6 ? { signal: "recall_success", strength: 1 } : { signal: "recall_fail", strength: -1 });
+    // Recall is graded like any answer: half remembered is partial credit, not a failed recall.
+    if (correctness >= 0.6) signals.push({ signal: "recall_success", strength: 1 });
+    else if (correctness >= 0.4) signals.push({ signal: "partial", strength: Math.round(correctness * 100) / 100 });
+    else signals.push({ signal: "recall_fail", strength: -1 });
   } else if (correctness >= 0.8) {
     if (selfCorrection || attempts > 0) signals.push({ signal: "self_corrected", strength: 0.6 });
     else signals.push({ signal: "correct", strength: hintsUsed ? 0.6 : 1 });
